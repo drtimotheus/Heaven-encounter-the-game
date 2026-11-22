@@ -4,6 +4,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { TerraceWorld, InteractablePoint } from './world/TerraceWorld';
+import { buildHeavenEnvironmentMap } from './world/ProceduralTextures';
 import { GuidedVisionController, VisionKind } from './world/GuidedVisions';
 import { DIALOGUES, DialogueNode } from './data/dialogues';
 import { REFERENCE_PLATES } from './data/plates';
@@ -20,17 +21,19 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.08;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0xf5e5c4, 0.0085);
+scene.fog = new THREE.FogExp2(0xf5e5c4, 0.0072);
+scene.environment = buildHeavenEnvironmentMap(renderer);
+scene.environmentIntensity = 0.85;
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 350);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 380);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.38,
-  0.65,
-  0.76
+  0.34,
+  0.72,
+  0.8
 );
 composer.addPass(bloomPass);
 
