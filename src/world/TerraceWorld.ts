@@ -725,8 +725,8 @@ export class TerraceWorld {
     const treeY = this.getGroundHeight(-14.8, -9.2);
     this.interactables.push({
       id: 'healing-leaves',
-      label: 'Tree of Life — Gather Healing Leaves',
-      sublabel: 'Press E to breathe the leaves of the Walled Orchard',
+      label: 'Mara’s Orchard — Breathe the Healing Leaves',
+      sublabel: 'Press E to breathe the leaves with Mara',
       position: new THREE.Vector3(-14.8, treeY + 1.2, -9.2),
       radius: 3.6,
       type: 'leaves',

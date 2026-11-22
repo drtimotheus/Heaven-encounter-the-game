@@ -40,6 +40,8 @@ export class SaintAgent {
     this.state = profile.behavior === 'admire' ? 'bench-rest' : profile.behavior;
     this.group.position.set(profile.position[0], groundY, profile.position[2]);
     this.buildSculptedRig(fabricMaps);
+    const bodyScale = profile.bodyScale ?? 1;
+    if (bodyScale !== 1) this.group.scale.setScalar(bodyScale);
     this.group.lookAt(profile.lookAt[0], groundY, profile.lookAt[2]);
   }
 
@@ -218,25 +220,36 @@ export class SaintAgent {
       this.headGroup.add(brow);
     });
 
-    // Sculpted Hair Volume + Curls/Waves
-    const hairCap = new THREE.Mesh(
-      new THREE.SphereGeometry(0.184, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.62),
-      hairMat
-    );
-    hairCap.scale.set(0.96, 1.06, 1.02);
-    hairCap.position.set(0, 0.18, -0.012);
-    this.headGroup.add(hairCap);
+    if (p.balding) {
+      const fringe = new THREE.Mesh(new THREE.TorusGeometry(0.145, 0.038, 8, 18), hairMat);
+      fringe.rotation.x = Math.PI / 2.15;
+      fringe.position.set(0, 0.2, -0.01);
+      this.headGroup.add(fringe);
+      const nape = new THREE.Mesh(
+        new THREE.SphereGeometry(0.15, 12, 8, Math.PI * 0.15, Math.PI * 1.7, Math.PI * 0.45, Math.PI * 0.4),
+        hairMat
+      );
+      nape.position.set(0, 0.12, -0.04);
+      this.headGroup.add(nape);
+    } else {
+      const hairCap = new THREE.Mesh(
+        new THREE.SphereGeometry(0.184, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.62),
+        hairMat
+      );
+      hairCap.scale.set(0.96, 1.06, 1.02);
+      hairCap.position.set(0, 0.18, -0.012);
+      this.headGroup.add(hairCap);
 
-    // Back hair / curls
-    const backHair = new THREE.Mesh(new THREE.SphereGeometry(0.155, 14, 12), hairMat);
-    backHair.scale.set(1.05, p.hasHeadscarf || p.id === 'mara' ? 1.45 : 0.95, 0.72);
-    backHair.position.set(0, p.hasHeadscarf || p.id === 'mara' ? 0.08 : 0.14, -0.09);
-    this.headGroup.add(backHair);
+      const backHair = new THREE.Mesh(new THREE.SphereGeometry(0.155, 14, 12), hairMat);
+      backHair.scale.set(1.05, p.hasHeadscarf || p.id === 'mara' ? 1.45 : 0.95, 0.72);
+      backHair.position.set(0, p.hasHeadscarf || p.id === 'mara' ? 0.08 : 0.14, -0.09);
+      this.headGroup.add(backHair);
+    }
 
     if (p.hasBeard) {
-      const beard = new THREE.Mesh(new THREE.SphereGeometry(0.135, 14, 12), hairMat);
-      beard.scale.set(0.92, 1.15, 0.78);
-      beard.position.set(0, 0.035, 0.075);
+      const beard = new THREE.Mesh(new THREE.SphereGeometry(p.balding ? 0.1 : 0.135, 14, 12), hairMat);
+      beard.scale.set(0.92, p.balding ? 0.72 : 1.15, 0.78);
+      beard.position.set(0, p.balding ? 0.06 : 0.035, 0.075);
       this.headGroup.add(beard);
 
       const mustache = new THREE.Mesh(new THREE.CapsuleGeometry(0.022, 0.08, 4, 8), hairMat);

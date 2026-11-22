@@ -1,8 +1,21 @@
 export interface DialogueChoice {
   label: string;
   nextId: string | null;
-  action?: 'breathe-leaves' | 'vision-creation' | 'vision-cross' | 'vision-sawdust' | 'mark-healed';
+  /** complete-fellowship: a testimony branch finished. Pressing E, or saying goodbye on the opening line, does not count. */
+  action?: 'breathe-leaves' | 'vision-creation' | 'vision-cross' | 'vision-sawdust' | 'complete-fellowship';
 }
+
+/**
+ * Timothy's decisions (Nov 22, 2026), held in the playable script.
+ * Jesus / the Elder Brother has one approved spoken line, from the novel, and no others.
+ * The testimony arc's middle beat is Turning Point. The thief on the cross is Dismas.
+ */
+export const CANON = {
+  elderBrotherLine: 'Peace be unto this house.',
+  elderBrotherNote: 'Novel Ch. 12; cf. Luke 10:5. Novel canon, not a KJV quotation.',
+  thiefOnTheCross: 'Dismas',
+  arcTurningName: 'Turning Point'
+} as const;
 
 export interface DialogueNode {
   id: string;
@@ -35,6 +48,12 @@ export interface SaintProfile {
   vestColor: number;
   robeLowerColor: number;
   hairColor: number;
+  /** Fringe of hair and a bare crown, instead of a full hair cap. */
+  balding?: boolean;
+  /** 1 is average height. Paul is short beside the other saints. */
+  bodyScale?: number;
+  /** Vertical-slice anchors: Paul, Amos, Elias Vance, Mara. */
+  demoCast?: 'apostle' | 'guide' | 'narrator' | 'orchard';
   skinColor: number;
   auraColor: number;
   hasBench: boolean;
@@ -70,6 +89,7 @@ export const SAINTS: SaintProfile[] = [
     hairColor: 0xd9d4c7,
     skinColor: 0xd1a27c,
     auraColor: 0xffdf99,
+    demoCast: 'guide',
     hasBench: true,
     benchOffset: [-1.5, 0, 0.3],
     greetingLines: [
@@ -97,13 +117,14 @@ export const SAINTS: SaintProfile[] = [
     hairColor: 0x47332a,
     skinColor: 0xd9b092,
     auraColor: 0xf7b9a1,
+    demoCast: 'orchard',
     hasBench: true,
     benchOffset: [0.3, 0, 1.7],
     greetingLines: [
-      'You are safe in this orchard. Nobody puts a hand on your collar here.',
-      'Come sit under the leaves with us—the light is gentle here.'
+      'Welcome to the orchard. Come sit under the leaves—the light is gentle here.',
+      'There was no mistake. There never is, with Him.'
     ],
-    leafReaction: 'Look how the light settles softly over the orchard... a scar can stand in the sun.'
+    leafReaction: 'The leaves let every memory shine in the light of grace.'
   },
   {
     id: 'thomas',
@@ -149,10 +170,11 @@ export const SAINTS: SaintProfile[] = [
     hairColor: 0xc9c4b8,
     skinColor: 0xd6a785,
     auraColor: 0xffd584,
+    demoCast: 'narrator',
     hasBench: true,
     benchOffset: [-1.5, 0, 0.5],
     greetingLines: [
-      'Good to see you, neighbor. Step up to the Golden Pool whenever you’re ready.',
+      'Good to see you, neighbor. I’m sixty-three, and the Golden Pool will keep until you’re ready.',
       'Forty years of framing houses, and I never saw joinery like Heaven’s.'
     ],
     leafReaction: 'That scent goes straight past the walls we used to hide behind.'
@@ -172,17 +194,20 @@ export const SAINTS: SaintProfile[] = [
     behavior: 'pair-talk',
     prop: 'scroll',
     hasBeard: true,
+    balding: true,
+    bodyScale: 0.76,
+    demoCast: 'apostle',
     shirtColor: 0xdfd3be,
     vestColor: 0x7a343b, // Deep crimson mantle
     robeLowerColor: 0x5c4738,
-    hairColor: 0x4a3d35,
+    hairColor: 0x9a9187, // Graying fringe
     skinColor: 0xc7926b,
     auraColor: 0xffc796,
     hasBench: true,
     benchOffset: [1.4, 0, 1.0],
     greetingLines: [
-      'Grace and peace to you! I was just telling Cephas how tiny my ink was.',
-      'Come join us—I spent half my life arguing and the other half marveling.'
+      "Grace and peace to you! Pull up a stone. I'm better at sitting than arguing these days!",
+      'Come join us—Cephas and I only compete over who serves the other first.'
     ],
     leafReaction: 'Every earthly affliction really was momentary beside this weight of glory!'
   },
@@ -201,6 +226,7 @@ export const SAINTS: SaintProfile[] = [
     hasBeard: true,
     shirtColor: 0xd6ccb8,
     vestColor: 0x355b7d, // Sea-blue fisherman cloak
+    bodyScale: 1.06,
     robeLowerColor: 0x4d4a44,
     hairColor: 0x8f877d,
     skinColor: 0xc48f67,
@@ -380,10 +406,10 @@ export const AMBIENT_BANTER_PAIRS: AmbientBanterPair[] = [
     id: 'banter-paul-peter',
     speakers: ['paul', 'peter'],
     lines: [
-      { speakerId: 'peter', text: 'You still owe me an apology for calling me out in front of everybody at Antioch, Paul.' },
-      { speakerId: 'paul', text: 'Ha! You were eating with the Gentiles until James’s men walked in, Cephas—and you know it!' },
-      { speakerId: 'peter', text: 'Fair enough. Though admit it—my letters were a lot easier to read than your run-on sentences.' },
-      { speakerId: 'paul', text: 'Only because you had the sea breeze in your head and I had three scrolls on my lap! Thank God neither of us had to pass an exam to sit here.' }
+      { speakerId: 'peter', text: 'Brother, I did write that some things in your letters are hard to be understood.' },
+      { speakerId: 'paul', text: "And you called me 'our beloved brother Paul.' I read that part more often!" },
+      { speakerId: 'peter', text: 'Antioch was a long time ago.' },
+      { speakerId: 'paul', text: 'I withstood you to the face. Now we only compete over who serves the other first.' }
     ]
   },
   {
@@ -392,7 +418,7 @@ export const AMBIENT_BANTER_PAIRS: AmbientBanterPair[] = [
     lines: [
       { speakerId: 'elijah', text: 'Remember standing on that mountain talking with Him before Jerusalem? I thought my heart would burst.' },
       { speakerId: 'moses', text: 'And Peter immediately offered to build us three tents! Bless that fisherman.' },
-      { speakerId: 'elijah', text: 'We both spent a lifetime running across deserts—funny how resting here took longer to learn than fleeing Jezebel.' },
+      { speakerId: 'elijah', text: 'We both ran across deserts. Here, every road runs toward Him.' },
       { speakerId: 'moses', text: 'I only saw Canaan from Nebo, brother. Yet this country makes every mile of Sinai worth it.' }
     ]
   },
@@ -429,7 +455,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
       { label: 'Why does the light feel so gentle here compared to the distant City?', nextId: 'amos_banked' },
       { label: 'What is that dark canyon of gray mist off to the east?', nextId: 'amos_mist' },
       { label: 'Take me into Vision #1: Creation ("Let There Be Light").', nextId: null, action: 'vision-creation' },
-      { label: 'Thank you, Amos. I want to walk and listen to the saints.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Amos. I want to walk and listen to the saints.', nextId: null }
     ]
   },
   amos_banked: {
@@ -440,17 +466,17 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     choices: [
       { label: 'Tell me about the Gray Mist at the cliff edge.', nextId: 'amos_mist' },
       { label: 'Show me Creation—"Let There Be Light."', nextId: null, action: 'vision-creation' },
-      { label: 'I will explore the Terrace and the Orchard.', nextId: null, action: 'mark-healed' }
+      { label: 'I will explore the Terrace and the Orchard.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   amos_mist: {
     id: 'amos_mist',
     speaker: 'Amos',
     role: 'Keeper of the Trees & New Arrivals',
-    text: 'That is the hardest sight in all of Heaven, and the most honest. God casts no one out—the gates of the City are never shut, day or night. There are no chains here and no cages. Love that could be forced would not be love. He will only, forever, stand in the open door with the light behind Him, and let every soul choose.',
+    text: 'That trail is the honest edge of the country. He compels no one, and the gates are never shut (Rev 21:25). Turn around, friend. Look how much light is facing you.',
     choices: [
-      { label: 'That makes the grace here feel even more real.', nextId: 'amos_1', action: 'mark-healed' },
-      { label: 'Thank you, Amos. I will sit with that for a moment.', nextId: null, action: 'mark-healed' }
+      { label: 'That makes the grace here feel even more real.', nextId: 'amos_1', action: 'complete-fellowship' },
+      { label: 'Thank you, Amos. I will sit with that for a moment.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -459,11 +485,11 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'mara_1',
     speaker: 'Mara',
     role: 'The Healed — Walled Orchard',
-    text: 'When I first arrived on the Terrace, I stood at the very edge of the grass with my arms wrapped tight around myself. I kept telling Amos there had been a mistake—that once the clean light showed what I had been, someone would put a hand on my collar and show me the door. Mary Magdalene sat beside me here until I finally believed I belonged.',
+    text: "Welcome! I'm the one who used to stand at the edge of the grass, sure there'd been a mistake. (laughs) There wasn't. There never is, with Him. I kept telling Amos the clean light would show what I had been and someone would send me away. Mary Magdalene sat beside me here until I finally believed I belonged.",
     choices: [
       { label: 'What changed for you in this orchard?', nextId: 'mara_leaves' },
       { label: 'Did the leaves erase your memories?', nextId: 'mara_scars' },
-      { label: 'I am glad you stayed, Mara.', nextId: null, action: 'mark-healed' }
+      { label: 'I am glad you stayed, Mara.', nextId: null }
     ]
   },
   mara_leaves: {
@@ -480,10 +506,10 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'mara_scars',
     speaker: 'Mara',
     role: 'The Healed — Walled Orchard',
-    text: 'No—and I am grateful they did not. I remember every hard room and every broken year. What the leaves did was far kinder: they drew the poison out of the memory. They turned an open, bleeding wound into a healed scar. A wound flinches from the light—but a scar can stand straight up in the sun and be loved on.',
+    text: 'No—and I am grateful they did not. I remember every hard room and every broken year. The leaves let me see every memory the way grace sees it (Rev 22:2). The facts are still true. The sting is gone.',
     choices: [
       { label: 'Breathe the Healing Leaves now', nextId: 'mara_after_leaves', action: 'breathe-leaves' },
-      { label: 'Thank you for telling me the truth, Mara.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you for telling me the truth, Mara.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   mara_after_leaves: {
@@ -492,7 +518,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'The Healed — Walled Orchard',
     text: 'Feel that? Notice how the saints across the Terrace paused and smiled when the wave passed. Later, when you pass under the Eastern Gate of One Pearl, the keeper does not read a ledger of your failures—he speaks your True Name. It was never ours to earn. It was just for us the whole time.',
     choices: [
-      { label: 'Thank you, Mara. My eyes feel clearer already.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Mara. My eyes feel clearer already.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -501,21 +527,21 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'thomas_1',
     speaker: 'Rev. Thomas Ainsley',
     role: 'The Striver — Freed from the Ledger',
-    text: 'Forgive me—when I first got here I could not keep my hands still. Forty years on the mission field, and I arrived auditing my whole life like a ledger I was certain would not balance. I left a field too soon in 1961. Worse, I hid inside good work while my own daughter grew up starving for her father.',
+    text: "Ha! Sit, sit. My hands are finally still. I arrived with a ledger, forty years of mission work and a 1961 departure I thought I'd never balance. A whole company came down the road singing 'Jesus Paid It All.'",
     choices: [
       { label: 'How did you finally lay the ledger down?', nextId: 'thomas_song' },
       { label: 'It takes courage to admit hiding inside good work.', nextId: 'thomas_bench' },
-      { label: 'Rest easy by the river, Thomas.', nextId: null, action: 'mark-healed' }
+      { label: 'Rest easy by the river, Thomas.', nextId: null }
     ]
   },
   thomas_song: {
     id: 'thomas_song',
     speaker: 'Rev. Thomas Ainsley',
     role: 'The Striver — Freed from the Ledger',
-    text: 'Mine came walking down the road as a song—"Jesus Paid It All." One of the saints knelt right here in the grass and did not argue with a single line of my ledger. She just smiled and said: "No one at that table earned their seat, Thomas. Your forty years were not the payment—they were the thank-you."',
+    text: 'The company sang "Jesus Paid It All," and someone among them sang Rock of Ages: "Nothing in my hand I bring, Simply to Thy cross I cling." One of the saints knelt right here in the grass and did not argue with a single line of my ledger. She just smiled and said: "No one at that table earned their seat, Thomas. Your forty years were not the payment—they were the thank-you."',
     choices: [
       { label: 'And then the Master came through the garden?', nextId: 'thomas_bench' },
-      { label: 'Not the payment—the thank-you. I needed to hear that.', nextId: null, action: 'mark-healed' }
+      { label: 'Not the payment—the thank-you. I needed to hear that.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   thomas_bench: {
@@ -524,7 +550,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'The Striver — Freed from the Ledger',
     text: 'He walked bench to bench on foot, folded Himself right down beside me on this grass, and put His arm around my shoulders. You simply cannot go on believing you owe a debt to Someone sitting beside you calling you friend.',
     choices: [
-      { label: 'Thank you, Thomas. Peace to you.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Thomas. Peace to you.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -533,23 +559,23 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'elias_1',
     speaker: 'Elias Vance',
     role: 'The Builder — Mentor of Living Memory',
-    text: 'Name’s Elias. Built houses for forty years—square corners, plumb walls—and quietly filed Heaven away with the blueprints that never got funded. Worse, after losing my wife Ruth and our little girl Naomi, I built a wall of silence between me and my boy Daniel. They sent me back once, just long enough to answer June and write Daniel the truth in a blunt pencil. Now I’m Home for good.',
+    text: 'Name’s Elias. I’m sixty-three. I built houses for forty years—square corners, plumb walls—and quietly filed Heaven away with the blueprints that never got funded. After Ruth and I lost our first baby, the little girl Ruth named Naomi up here, I built a wall of silence for thirty years between me and my boy Daniel. They sent me back once, just long enough to answer June and write Daniel the truth in a blunt pencil. Now I’m Home for good.',
     choices: [
       { label: 'Step with me into Vision #2: The Cross ("The Wound That Became a Gate")', nextId: null, action: 'vision-cross' },
       { label: 'Show me Vision #3: "The Boy in the Sawdust" (Ripple Review)', nextId: null, action: 'vision-sawdust' },
       { label: 'Tell me what actually lasts when the houses burn.', nextId: 'elias_sawdust' },
-      { label: 'I’ll look into the Golden Pool in a moment, Elias.', nextId: null, action: 'mark-healed' }
+      { label: 'I’ll look into the Golden Pool in a moment, Elias.', nextId: null }
     ]
   },
   elias_sawdust: {
     id: 'elias_sawdust',
     speaker: 'Elias Vance',
     role: 'The Builder — Mentor of Living Memory',
-    text: 'In my life review, the light did not glance once at a single roof I raised for pride. It showed me a Wednesday fifty years back when a grieving seventeen-year-old boy on my crew sat crying behind stacked lumber. I sat down in the sawdust beside him and forgot it inside a week. The light did not forget. Sitting down beside someone is the only building material that survives the fire.',
+    text: 'In my life review, the light did not glance once at a single roof I raised for pride. It showed me a Wednesday about forty years back, when a seventeen-year-old boy on my crew sat behind stacked lumber. I sat down in the sawdust beside him and forgot it inside a week. The light did not forget. Sitting down beside someone is the only building material that survives the fire.',
     choices: [
       { label: 'Witness "The Boy in the Sawdust" in Living Memory', nextId: null, action: 'vision-sawdust' },
       { label: 'Witness "The Cross — The Wound That Became a Gate"', nextId: null, action: 'vision-cross' },
-      { label: 'Thank you, Elias. I will carry that with me.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Elias. I will carry that with me.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -558,21 +584,21 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'paul_1',
     speaker: 'Paul of Tarsus',
     role: 'Apostle of Grace — New Testament',
-    text: 'Welcome, brother or sister! People arrive expecting me to lecture them on theology, and the first thing I want to tell them is how wrong I was for half my life. I stood holding the coats while Stephen was stoned, convinced my zeal made me righteous. Then a Light brighter than noon knocked me off my horse—and instead of crushing me, He called me by name and sent me to speak of mercy.',
+    text: 'Welcome, brother or sister! Grace and peace. I stood holding the coats while Stephen was stoned, convinced my zeal made me righteous. Then a light from heaven, above the brightness of the sun, and I fell to the earth. He called me by name and sent me to speak of mercy—and Stephen was one of the first faces waiting for me here. That road was my Turning Point. Grace!',
     choices: [
       { label: 'What surprised you most when you finally arrived here?', nextId: 'paul_2' },
       { label: 'I heard you and Peter joking about Antioch!', nextId: 'paul_peter' },
-      { label: 'Thank you, Paul. Grace and peace to you.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Paul. Grace and peace to you.', nextId: null }
     ]
   },
   paul_2: {
     id: 'paul_2',
     speaker: 'Paul of Tarsus',
     role: 'Apostle of Grace — New Testament',
-    text: 'I wrote to Corinth that "now we see through a glass darkly, but then face to face." I meant it as poetry—I had no idea how literal the glass was! Every thorn in my flesh, every shipwreck, every cold prison floor in Rome—standing here, it truly feels like a light momentary shadow beside this eternal weight of glory.',
+    text: 'I wrote to Corinth, "For now we see through a glass, darkly; but then face to face." I meant it as poetry—I had no idea how literal the glass was! My thorn, every shipwreck, every cold prison floor in Rome—standing here, it truly feels like a light momentary shadow beside this eternal weight of glory.',
     choices: [
       { label: 'And you met Stephen again here?', nextId: 'paul_stephen' },
-      { label: 'Thank you for your honesty, Paul.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you for your honesty, Paul.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   paul_stephen: {
@@ -581,7 +607,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Apostle of Grace — New Testament',
     text: 'He was one of the very first faces waiting for me on the riverbank! He wrapped his arms around me laughing and said, "Saul, my prayer worked!" That is what Heaven does to earthly guilt—it turns an enemy into a brother.',
     choices: [
-      { label: 'That changes how I think about forgiveness.', nextId: null, action: 'mark-healed' }
+      { label: 'That changes how I think about forgiveness.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   paul_peter: {
@@ -590,7 +616,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Apostle of Grace — New Testament',
     text: 'Ah, you overheard us! Good—there are no marble statues up here, only real men and women rescued by the same cross. Peter and I argued fiercely on earth because we both cared deeply and saw in part. Up here, the partial fell away and only the friendship remained.',
     choices: [
-      { label: 'I love seeing you two laughing together.', nextId: null, action: 'mark-healed' }
+      { label: 'I love seeing you two laughing together.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -599,20 +625,20 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'peter_1',
     speaker: 'Simon Peter',
     role: 'The Fisherman Disciple — New Testament',
-    text: 'Pull up close, friend! Don’t let the stained-glass windows fool you—I was loud, impulsive, and terrified of looking foolish. The night He needed a single loyal friend, I swore three times by a charcoal fire that I didn’t even know His name. Then the rooster crowed, and I wept like a broken man.',
+    text: 'Pull up close, friend! Don’t let the stained-glass windows fool you—I was loud and impulsive, and I used to hate looking foolish. The night He needed a single loyal friend, I swore three times by a charcoal fire that I didn’t even know His name. Then the rooster crowed, and I went out, and wept bitterly—and then He cooked me breakfast. I’ve been laughing ever since.',
     choices: [
       { label: 'How did you ever recover from denying Him?', nextId: 'peter_2' },
       { label: 'Do you miss the Sea of Galilee?', nextId: 'peter_sea' },
-      { label: 'Good talking with you, Peter.', nextId: null, action: 'mark-healed' }
+      { label: 'Good talking with you, Peter.', nextId: null }
     ]
   },
   peter_2: {
     id: 'peter_2',
     speaker: 'Simon Peter',
     role: 'The Fisherman Disciple — New Testament',
-    text: 'I didn’t recover myself—He came looking for me! Cooked fish over another charcoal fire on the beach so the very smell of my worst failure became the smell of breakfast with my Friend. Three denials, three times He asked, "Do you love Me?" If He had room for a blundering fisherman, I promise you He has room for you.',
+    text: 'I didn’t recover myself—He came looking for me! He cooked fish over another charcoal fire on the beach, and the smell of that night became the smell of breakfast with my Friend. Three denials, three times He asked, "Lovest thou me?" If He had room for a blundering fisherman, I promise you He has room for you.',
     choices: [
-      { label: 'That gives me so much hope, Peter.', nextId: null, action: 'mark-healed' }
+      { label: 'That gives me so much hope, Peter.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   peter_sea: {
@@ -621,7 +647,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'The Fisherman Disciple — New Testament',
     text: 'Wait until your eyes grow strong enough for the Sapphire Sea of Glass past the Eastern Gate! On Galilee, the storms nearly drowned us. Up there, the entire sea has finally come to rest—still as crystal before the One who told the wind, "Peace, be still."',
     choices: [
-      { label: 'I cannot wait to see it.', nextId: null, action: 'mark-healed' }
+      { label: 'I cannot wait to see it.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -634,7 +660,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     choices: [
       { label: 'What was it like seeing Him in the garden at dawn?', nextId: 'mary_2' },
       { label: 'Why do you spend so much time with new arrivals?', nextId: 'mary_3' },
-      { label: 'Thank you, Mary.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Mary.', nextId: null }
     ]
   },
   mary_2: {
@@ -643,16 +669,16 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'First Witness of the Dawn — Disciple',
     text: 'I thought everything good in the universe had been buried behind a stone. Even standing two steps from Him, my grief blinded me until He said one single word: "Mary." That is how I know He never forgets the brokenhearted—the very first voice He chose to announce the resurrection was a weeping woman the scholars would not have believed.',
     choices: [
-      { label: 'He still meets people in gardens first.', nextId: null, action: 'mark-healed' }
+      { label: 'He still meets people in gardens first.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   mary_3: {
     id: 'mary_3',
     speaker: 'Mary Magdalene',
     role: 'First Witness of the Dawn — Disciple',
-    text: 'Because grief makes you think you are alone in the dark. Sometimes the holiest thing you can do for someone arriving from Earth is just hand them a flower that won’t die and wait with them until their breathing slows.',
+    text: "Because everyone deserves a welcome. I hand each newcomer a flower that won't wilt and tell them He knows their name.",
     choices: [
-      { label: 'Thank you for being here, Mary.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you for being here, Mary.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -665,7 +691,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     choices: [
       { label: 'You called yourself "the disciple whom Jesus loved." Why?', nextId: 'john_2' },
       { label: 'What is waiting past that Eastern Gate?', nextId: 'john_3' },
-      { label: 'Peace to you, John.', nextId: null, action: 'mark-healed' }
+      { label: 'Peace to you, John.', nextId: null }
     ]
   },
   john_2: {
@@ -674,7 +700,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Disciple & Seer of Patmos — New Testament',
     text: 'People sometimes think I was bragging—never! I was stunned. Once my brother James and I wanted to call down fire on a village that rejected us. Learning that God IS love—not merely that He shows love now and then—remade my whole soul. Every soul standing on this Terrace is "the disciple whom Jesus loves."',
     choices: [
-      { label: 'I will remember that.', nextId: null, action: 'mark-healed' }
+      { label: 'I will remember that.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   john_3: {
@@ -683,7 +709,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Disciple & Seer of Patmos — New Testament',
     text: 'Inside the jasper wall, the Gatekeeper speaks your True Name. Beyond it, light shines up from beneath the transparent gold so no one casts a shadow—and at the center, no temple and no sun, because the Lamb Himself is the light of it all.',
     choices: [
-      { label: 'Thank you, John.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, John.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -692,11 +718,11 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'david_1',
     speaker: 'King David',
     role: 'Shepherd & Psalmist — Old Testament',
-    text: 'Come sit on the grass, friend! Listen to the hills—every meadow blade hums a note I spent forty years trying to catch on a ten-stringed harp. On Earth I knew triumph and I knew terrible failure—hiding in caves, grieving my own sins, crying out in the night, "Have mercy on me, O God."',
+    text: 'Come sit on the grass, friend! Listen—the hills are already singing, and I get to join them. Every meadow blade hums a note I spent forty years trying to catch on a ten-stringed harp. There were nights on Earth I cried, "Have mercy upon me, O God," and He heard. Look where that mercy carried a shepherd.',
     choices: [
-      { label: 'How did you write so honestly about despair and still praise?', nextId: 'david_2' },
+      { label: 'How did honest songs turn into praise?', nextId: 'david_2' },
       { label: 'What is music like here in Heaven?', nextId: 'david_music' },
-      { label: 'Play on, David. It is good to hear you.', nextId: null, action: 'mark-healed' }
+      { label: 'Play on, David. It is good to hear you.', nextId: null }
     ]
   },
   david_2: {
@@ -705,7 +731,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Shepherd & Psalmist — Old Testament',
     text: 'Because God never wanted polite masks—He wanted truth in the inward parts! The Psalms were never the songs of a flawless king; they were the honest cries of a shepherd who discovered that a broken and contrite heart He will never despise. Look where that mercy carried me.',
     choices: [
-      { label: 'Your honesty kept millions of people from giving up.', nextId: null, action: 'mark-healed' }
+      { label: 'Your honesty kept millions of people from giving up.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   david_music: {
@@ -714,7 +740,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Shepherd & Psalmist — Old Testament',
     text: 'Here, music isn’t just vibration in the air—you can stand inside a chord and understand something true about the mercy of God all at once. Wait until you hear the Voice of Many Waters at the Sea of Glass—and don’t be afraid to add your own note!',
     choices: [
-      { label: 'Thank you, David.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, David.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -725,18 +751,18 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Shepherd of Sinai — Old Testament',
     text: 'Welcome to the real Promised Land, traveler. I spent forty years in Midian convinced I had ruined my calling with one violent afternoon in Egypt, and another forty years leading weary people through wilderness sand. When I struck the rock in anger, I only got to see Canaan from Mount Nebo.',
     choices: [
-      { label: 'Did it hurt to stop at Mount Nebo?', nextId: 'moses_2' },
+      { label: 'What was it like to finally stand in the Promised Land?', nextId: 'moses_2' },
       { label: 'You once asked God to show you His glory—and now?', nextId: 'moses_glory' },
-      { label: 'Peace to you, Moses.', nextId: null, action: 'mark-healed' }
+      { label: 'Peace to you, Moses.', nextId: null }
     ]
   },
   moses_2: {
     id: 'moses_2',
     speaker: 'Moses',
     role: 'Shepherd of Sinai — Old Testament',
-    text: 'It broke my heart—until the Lord Himself buried me and brought me straight into the country Canaan was only a shadow of! Even better, centuries later He invited Elijah and me onto a Galilean mountaintop to speak with His Son face to face. His mercy is always bigger than our missed turns.',
+    text: 'I saw it from Nebo, and then He brought me farther than Canaan ever reached. Centuries later He invited Elijah and me onto a Galilean mountaintop to speak with His Son face to face. His mercy is always bigger than our missed turns.',
     choices: [
-      { label: 'What a comfort to hear that from you.', nextId: null, action: 'mark-healed' }
+      { label: 'What a comfort to hear that from you.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   moses_glory: {
@@ -745,7 +771,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Shepherd of Sinai — Old Testament',
     text: 'On Sinai He had to hide me in the cleft of a rock so the full blaze wouldn’t consume me. That is why this Terrace is banked gentle at first—He enlarges your heart step by tender step until you can stand unveiled before the Face we only glimpsed in shadow.',
     choices: [
-      { label: 'Thank you, Moses.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Moses.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -754,20 +780,20 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'elijah_1',
     speaker: 'Prophet Elijah',
     role: 'Prophet of the Still Small Voice — Old Testament',
-    text: 'Everyone remembers the fire falling on Mount Carmel. Almost nobody wants to talk about the very next day—when I ran into the desert, collapsed under a broom tree, and begged God to let me die because I was utterly spent and sure I was the last faithful soul left.',
+    text: 'Ha! Everyone wants the fire on Carmel. My favorite part is the bread! Pull up a seat and I will tell you about the loaf, the nap, and the whisper.',
     choices: [
       { label: 'How did God answer your exhaustion?', nextId: 'elijah_2' },
       { label: 'Why do you stand near the overlook of the Gray Mist?', nextId: 'elijah_mist' },
-      { label: 'Thank you for being so real, Elijah.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you for being so real, Elijah.', nextId: null }
     ]
   },
   elijah_2: {
     id: 'elijah_2',
     speaker: 'Prophet Elijah',
     role: 'Prophet of the Still Small Voice — Old Testament',
-    text: 'He did not scold me! He sent an angel to bake me warm bread, pour me water, and let me sleep twice. Then on the mountain, He wasn’t in the wind or the earthquake or the fire—He came in a gentle whisper. If you arrived tired from Earth, hear me: God is far kinder to weary people than we ever dared preach.',
+    text: 'There was a day on Earth, under a juniper tree, when I requested for myself that I might die (1 Kings 19:4). That day is long past. He did not scold me! He sent an angel to bake me warm bread, pour me water, and let me sleep twice. Then on the mountain, He wasn’t in the wind or the earthquake or the fire—He came in a gentle whisper. The bread is still my favorite part. God is far kinder to weary people than we ever dared preach.',
     choices: [
-      { label: 'Bread, rest, and a whisper. I love that.', nextId: null, action: 'mark-healed' }
+      { label: 'Bread, rest, and a whisper. I love that.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   elijah_mist: {
@@ -776,7 +802,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Prophet of the Still Small Voice — Old Testament',
     text: 'Because I spent my life crying out, "How long will you waver between two opinions?" Seeing that open downward trail reminds me of the dignity God gave every human heart: He never drags anyone across the threshold, yet He never closes the gate either.',
     choices: [
-      { label: 'Thank you, Elijah.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Elijah.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -785,20 +811,20 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     id: 'isaiah_1',
     speaker: 'Prophet Isaiah',
     role: 'Prophet of the High & Lifted Throne — Old Testament',
-    text: 'In the year King Uzziah died, I saw the Lord high and lifted up, and the sheer holiness of Him undid me on the spot. Every prophet thinks he is ready for glory until he stands inside it! Then a seraph touched my lips with a live coal from the altar and said, "Your guilt is taken away."',
+    text: 'In the year King Uzziah died, I saw the Lord high and lifted up—and now I laugh in that same light. A seraph touched my lips with a live coal from the altar and said, "thine iniquity is taken away, and thy sin purged."',
     choices: [
       { label: 'You also wrote about the Suffering Servant centuries before the Cross.', nextId: 'isaiah_2' },
       { label: 'What does it feel like seeing the fulfillment here?', nextId: 'isaiah_3' },
-      { label: 'Peace to you, Isaiah.', nextId: null, action: 'mark-healed' }
+      { label: 'Peace to you, Isaiah.', nextId: null }
     ]
   },
   isaiah_2: {
     id: 'isaiah_2',
     speaker: 'Prophet Isaiah',
     role: 'Prophet of the High & Lifted Throne — Old Testament',
-    text: '"By His stripes we are healed." I wrote those lines trembling, scarcely grasping how the King on the Throne would become the wounded Lamb. Ask Elias to show you Vision #2 in the Golden Pool—when you see the single-pearl gate grown around a wound, you will understand every chapter I wrote.',
+    text: 'I wrote it this way: "with his stripes we are healed." I scarcely grasped how the King on the Throne would become the wounded Lamb—and the joy of it still surprises me. Ask Elias to show you Vision #2 in the Golden Pool—when you see the single-pearl gate grown around a wound, you will understand every chapter I wrote.',
     choices: [
-      { label: 'I will step into the Cross vision at the Golden Pool.', nextId: null, action: 'mark-healed' }
+      { label: 'I will step into the Cross vision at the Golden Pool.', nextId: null, action: 'complete-fellowship' }
     ]
   },
   isaiah_3: {
@@ -807,7 +833,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Prophet of the High & Lifted Throne — Old Testament',
     text: 'Every promise I spoke in tears has bloomed in living color—the wilderness blossoming, the lame leaping, and every tear wiped from every face. Go up higher when your eyes are ready, friend.',
     choices: [
-      { label: 'Thank you, Isaiah.', nextId: null, action: 'mark-healed' }
+      { label: 'Thank you, Isaiah.', nextId: null, action: 'complete-fellowship' }
     ]
   },
 
@@ -818,7 +844,7 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     role: 'Environmental Reflection — Chapter 4',
     text: 'A narrow trail slopes downward into quiet, shadowless gray mist. There is no locked gate here, no fence, and no angel blocking the descent. Heaven compels no one—for love forced against the grain of a heart would not be love. Behind you, the sunlit road to the City stands forever open.',
     choices: [
-      { label: 'Turn back toward the sunlit Terrace', nextId: null, action: 'mark-healed' }
+      { label: 'Turn back toward the sunlit Terrace', nextId: null }
     ]
   },
   pool_menu: {
@@ -833,6 +859,15 @@ export const DIALOGUES: Record<string, DialogueNode> = {
       { label: 'Step back from the Pool', nextId: null }
     ]
   },
+  overlook_locked: {
+    id: 'overlook_locked',
+    speaker: 'The Rising Road Overlook',
+    role: 'Eyes Still Growing',
+    text: "The light ahead is bright. Sit a while longer on the Terrace; it'll be ready for you.",
+    choices: [
+      { label: 'Return to the saints on the Terrace', nextId: null }
+    ]
+  },
   overlook_unlocked: {
     id: 'overlook_unlocked',
     speaker: 'The Rising Road Overlook',
@@ -843,3 +878,65 @@ export const DIALOGUES: Record<string, DialogueNode> = {
     ]
   }
 };
+
+/** Problems if the vertical-slice cast or the joy / KJV guardrails slip. */
+export function auditDialogueCanon(): string[] {
+  const problems: string[] = [];
+  const byId = new Map(SAINTS.map((s) => [s.id, s]));
+  const paul = byId.get('paul');
+  const amos = byId.get('amos');
+  const elias = byId.get('elias');
+  const mara = byId.get('mara');
+  if (!paul?.balding || paul.hairColor !== 0x9a9187 || paul.demoCast !== 'apostle') {
+    problems.push('Paul must be the short, balding, gray-fringe demo apostle');
+  }
+  if (amos?.demoCast !== 'guide' || !DIALOGUES.amos_1.choices.some((c) => c.action === 'vision-creation')) {
+    problems.push('Amos must guide Vision #1 (Creation)');
+  }
+  if (elias?.demoCast !== 'narrator') problems.push('Elias Vance must be the narrator');
+  const eliasStartsVision = [...DIALOGUES.elias_1.choices, ...DIALOGUES.elias_sawdust.choices].some(
+    (c) => c.action === 'vision-cross' || c.action === 'vision-sawdust'
+  );
+  if (!eliasStartsVision) problems.push('Elias must lead the Cross and Sawdust visions');
+  if (mara?.demoCast !== 'orchard' || !DIALOGUES.mara_leaves.choices.some((c) => c.action === 'breathe-leaves')) {
+    problems.push('Mara must offer the orchard Healing Leaves');
+  }
+  if (CANON.elderBrotherLine !== 'Peace be unto this house.') problems.push('Elder Brother line drifted');
+  if (CANON.thiefOnTheCross !== 'Dismas') problems.push('The thief on the cross is Dismas');
+  if (CANON.arcTurningName !== 'Turning Point') problems.push('The arc beat is Turning Point');
+
+  const blob = JSON.stringify(DIALOGUES) + JSON.stringify(AMBIENT_BANTER_PAIRS) + JSON.stringify(SAINTS);
+  const forbidden = [
+    'Breaking Point',
+    'fifty years',
+    '1970',
+    'our little girl',
+    'my horse',
+    'off my horse',
+    'Every thorn',
+    'Do you love Me',
+    'By His stripes',
+    'Your guilt is taken away',
+    'Have mercy on me, O God',
+    'owe me an apology',
+    'run-on sentences',
+    'hardest sight in all of Heaven',
+    'bleeding wound',
+    'It broke my heart',
+    'begged God to let me die',
+    'glass darkly',
+    'Did it hurt to stop'
+  ];
+  for (const phrase of forbidden) {
+    if (blob.includes(phrase)) problems.push(`Forbidden phrase still in script: ${phrase}`);
+  }
+  if (/\bthief\b/i.test(blob) && !blob.includes(CANON.thiefOnTheCross)) {
+    problems.push('A thief is named without using Dismas');
+  }
+  for (const node of Object.values(DIALOGUES)) {
+    if ((node.speaker === 'Jesus' || node.speaker === 'Elder Brother') && node.text !== CANON.elderBrotherLine) {
+      problems.push(`Divine speech must stay "${CANON.elderBrotherLine}"`);
+    }
+  }
+  return problems;
+}

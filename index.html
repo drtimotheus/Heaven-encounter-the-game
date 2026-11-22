@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Heaven Encounter: The Game — The Terrace of New Arrivals</title>
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta
       name="description"
       content="Playable 3D Vertical Slice of Heaven Encounter: The Game, grounded in The Waiting Room of the Saints: A Novel of Heaven by Timothy Holt."
@@ -15,7 +17,7 @@
       rel="stylesheet"
     />
   </head>
-  <body>
+  <body data-mode="title">
     <canvas id="game-canvas"></canvas>
 
     <!-- Warm Radiance / Glory Veil Overlay -->
@@ -40,10 +42,11 @@
           <button id="btn-play" class="btn-primary">Step onto the Terrace</button>
           <button id="btn-art-bible-title" class="btn-secondary">Visual Art Bible (15 Plates)</button>
           <button id="btn-roadmap-title" class="btn-secondary">UE5 Flagship Roadmap</button>
+          <button id="btn-access-title" class="btn-secondary">Accessibility</button>
         </div>
 
         <p class="controls-note">
-          WASD / Arrow Keys to Walk · Click &amp; Drag (or Click Canvas) to Look 360° · Press <strong>E</strong> to Sit, Breathe Leaves &amp; Enter Visions
+          WASD / Arrow Keys to Walk · On a phone, use the on-screen joystick and drag to look · Press <strong>E</strong> or tap the prompt to sit and talk · Tab and arrow keys move through dialogue
         </p>
       </div>
     </section>
@@ -57,7 +60,7 @@
         </div>
         <div class="eyes-tracker" title="Growing Eyes — spiritual readiness opens the Rising Road Overlook">
           <span class="eyes-label">Eyes for Glory</span>
-          <span id="eye-fellowship" class="eye-pip" title="Honest Fellowship (Sit with a Saint)">Fellowship</span>
+          <span id="eye-fellowship" class="eye-pip" title="Honest Fellowship — finish a testimony, not just a greeting">Fellowship</span>
           <span id="eye-leaves" class="eye-pip" title="Healing Leaves (Walled Orchard)">Leaves</span>
           <span id="eye-vision" class="eye-pip" title="Living Memory (Golden Pool)">Vision</span>
         </div>
@@ -65,6 +68,7 @@
 
       <div class="hud-right">
         <button id="btn-guide" class="hud-btn">Places</button>
+        <button id="btn-access" class="hud-btn">Access</button>
         <button id="btn-art-bible" class="hud-btn">Art Bible</button>
         <button id="btn-mute" class="hud-btn">Sound: On</button>
         <button id="btn-menu" class="hud-btn">Title</button>
@@ -88,7 +92,15 @@
       <span><strong>WASD / Arrows</strong> Walk</span>
       <span><strong>Drag Mouse</strong> Look Around</span>
       <span><strong>E</strong> Interact / Sit</span>
-      <span><strong>1–4</strong> Dialogue Choices</span>
+      <span><strong>1–4 / Tab</strong> Dialogue Choices</span>
+    </div>
+
+    <div id="touch-controls" class="touch-controls">
+      <div id="joystick" class="joystick" role="slider" aria-label="Walk" aria-valuemin="0" aria-valuemax="1">
+        <div id="joystick-knob"></div>
+      </div>
+      <p class="touch-label">Walk</p>
+      <p class="touch-look">Drag to look</p>
     </div>
 
     <!-- Dialogue & Bench Overlay -->
@@ -141,8 +153,8 @@
             <span>Zone 1/2 · Living grass &amp; banked golden light</span>
           </button>
           <button class="place-btn" data-teleport="orchard">
-            <strong>The Walled Orchard (Mara, Mary Magdalene &amp; Thomas)</strong>
-            <span>Zone 3 · Trees of Life &amp; Healing Leaves</span>
+            <strong>The Walled Orchard — Mara &amp; the Healing Leaves</strong>
+            <span>Zone 3 · Lands beside Mara. Mary Magdalene and Thomas are nearby.</span>
           </button>
           <button class="place-btn" data-teleport="pool">
             <strong>Golden Pool of Living Memory (Elias Vance)</strong>
@@ -152,9 +164,9 @@
             <strong>The Fork &amp; Edge of the Gray Mist</strong>
             <span>Zone 1 East · Unchained witness to free will</span>
           </button>
-          <button class="place-btn" data-teleport="overlook">
+          <button id="btn-place-overlook" class="place-btn hidden" data-teleport="overlook">
             <strong>The Rising Road Overlook</strong>
-            <span>Zone 7 Horizon · Eastern Gate of One Pearl</span>
+            <span>Zone 7 Horizon · Opens after two Eyes for Glory</span>
           </button>
 
           <div class="places-section-label">Biblical Saints — Apostles, Disciples, Prophets &amp; Old Testament</div>
@@ -206,6 +218,67 @@
           <p id="lb-zone" class="lb-zone"></p>
           <p id="lb-summary"></p>
           <p id="lb-ue5" class="lb-ue5"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Accessibility -->
+    <section id="access-modal" class="modal-backdrop hidden">
+      <div class="modal-card compact">
+        <div class="modal-header">
+          <div>
+            <h2>Accessibility</h2>
+            <p class="modal-sub">Glory stays gentle. These settings are saved on this device.</p>
+          </div>
+          <button class="icon-close modal-close">Close ×</button>
+        </div>
+        <div class="access-body">
+          <label class="access-row">
+            <input id="opt-reduce-glow" type="checkbox" />
+            <span>
+              <strong>Reduce glow</strong>
+              <em>Lowers bloom, the overlook veil, and bright vision flashes.</em>
+            </span>
+          </label>
+          <label class="access-row">
+            <input id="opt-subtitles" type="checkbox" checked />
+            <span>
+              <strong>Subtitle background</strong>
+              <em>Keeps a dark plate behind dialogue, whispers, and vision captions.</em>
+            </span>
+          </label>
+          <label class="access-row access-slider">
+            <span>
+              <strong>Camera and motion sensitivity</strong>
+              <em>Look speed, and how fast the title view drifts. <span id="opt-sensitivity-value">1.00</span></em>
+            </span>
+            <input id="opt-sensitivity" type="range" min="0.35" max="1.6" step="0.05" value="1" />
+          </label>
+          <div class="access-row">
+            <span>
+              <strong>Graphics quality</strong>
+              <em>Low is the phone default: smaller shadows, no ambient occlusion. High adds SSAO and a whisper of depth of field. Changing this reloads the Terrace.</em>
+            </span>
+            <div class="text-size-row">
+              <button type="button" class="hud-btn" data-gfx="low">Low</button>
+              <button type="button" class="hud-btn" data-gfx="medium">Medium</button>
+              <button type="button" class="hud-btn" data-gfx="high">High</button>
+            </div>
+          </div>
+          <div class="access-row">
+            <span>
+              <strong>Text size</strong>
+              <em>Dialogue, captions, and whispers.</em>
+            </span>
+            <div class="text-size-row">
+              <button type="button" class="hud-btn" data-text-scale="0.9">Small</button>
+              <button type="button" class="hud-btn is-selected" data-text-scale="1">Medium</button>
+              <button type="button" class="hud-btn" data-text-scale="1.28">Large</button>
+            </div>
+          </div>
+          <p class="access-note">
+            In conversation, Tab or the arrow keys move the gold focus ring. Enter chooses. Keys 1–4 still work. A gamepad left stick walks, the right stick looks, and the south button talks.
+          </p>
         </div>
       </div>
     </section>
