@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Heaven Encounter: The Game — The Terrace of New Arrivals</title>
+    <meta
+      name="description"
+      content="Playable 3D Vertical Slice of Heaven Encounter: The Game, grounded in The Waiting Room of the Saints: A Novel of Heaven by Timothy Holt."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Warm Radiance / Glory Veil Overlay -->
+    <div id="glory-veil"></div>
+
+    <!-- Title / Landing Screen over Live 3D Terrace -->
+    <section id="title-screen" class="overlay-screen active">
+      <div class="title-card">
+        <p class="eyebrow">Playable 3D Browser Vertical Slice · Based on the Novel by Timothy Holt</p>
+        <h1>Heaven Encounter</h1>
+        <p class="subtitle">The Terrace of New Arrivals</p>
+        <p class="tagline">
+          A contemplative 3D exploration and narrative adventure grounded in
+          <em>The Waiting Room of the Saints</em>—replacing violence and chaos with healing,
+          honest fellowship, living memory, and awe.
+        </p>
+
+        <div class="title-actions">
+          <button id="btn-play" class="btn-primary">Step onto the Terrace</button>
+          <button id="btn-art-bible-title" class="btn-secondary">Visual Art Bible (15 Plates)</button>
+          <button id="btn-roadmap-title" class="btn-secondary">UE5 Flagship Roadmap</button>
+        </div>
+
+        <p class="controls-note">
+          WASD / Arrow Keys to Walk · Click &amp; Drag (or Click Canvas) to Look 360° · Press <strong>E</strong> to Sit, Breathe Leaves &amp; Enter Visions
+        </p>
+      </div>
+    </section>
+
+    <!-- Minimal In-Game HUD -->
+    <header id="hud" class="hidden">
+      <div class="hud-left">
+        <div id="zone-pill" class="glass-pill">
+          <span class="dot"></span>
+          <span id="zone-name">Zone 2 — The Terrace of New Arrivals</span>
+        </div>
+        <div class="eyes-tracker" title="Growing Eyes — spiritual readiness opens the Rising Road Overlook">
+          <span class="eyes-label">Eyes for Glory</span>
+          <span id="eye-fellowship" class="eye-pip" title="Honest Fellowship (Sit with a Saint)">Fellowship</span>
+          <span id="eye-leaves" class="eye-pip" title="Healing Leaves (Walled Orchard)">Leaves</span>
+          <span id="eye-vision" class="eye-pip" title="Living Memory (Golden Pool)">Vision</span>
+        </div>
+      </div>
+
+      <div class="hud-right">
+        <button id="btn-guide" class="hud-btn">Places</button>
+        <button id="btn-art-bible" class="hud-btn">Art Bible</button>
+        <button id="btn-mute" class="hud-btn">Sound: On</button>
+        <button id="btn-menu" class="hud-btn">Title</button>
+      </div>
+    </header>
+
+    <!-- Gentle Toast / Whisper Banner -->
+    <div id="whisper-banner" class="hidden"></div>
+
+    <!-- Contextual Interaction Prompt -->
+    <div id="interact-prompt" class="hidden">
+      <div class="prompt-key">E</div>
+      <div class="prompt-copy">
+        <div id="prompt-label">Sit with Amos</div>
+        <div id="prompt-sublabel">Press E to pull up a chair</div>
+      </div>
+    </div>
+
+    <!-- Bottom Controls Hint -->
+    <div id="controls-bar" class="hidden">
+      <span><strong>WASD / Arrows</strong> Walk</span>
+      <span><strong>Drag Mouse</strong> Look Around</span>
+      <span><strong>E</strong> Interact / Sit</span>
+      <span><strong>1–4</strong> Dialogue Choices</span>
+    </div>
+
+    <!-- Dialogue & Bench Overlay -->
+    <section id="dialogue-panel" class="hidden">
+      <div class="dialogue-card">
+        <div class="dialogue-header">
+          <div>
+            <h2 id="dlg-speaker">Amos</h2>
+            <p id="dlg-role">Keeper of the Trees &amp; New Arrivals</p>
+          </div>
+          <button id="btn-close-dlg" class="icon-close" aria-label="Stand up">Stand Up ×</button>
+        </div>
+        <p id="dlg-text"></p>
+        <div id="dlg-choices" class="dialogue-choices"></div>
+      </div>
+    </section>
+
+    <!-- Guided 3D Vision Overlay -->
+    <section id="vision-hud" class="hidden">
+      <div class="vision-top">
+        <div class="vision-badge">
+          <span id="vision-title">Vision #1 — Creation</span>
+          <span class="vision-hint">Drag mouse to look freely in 360°</span>
+        </div>
+        <button id="btn-exit-vision" class="hud-btn">Return to Terrace</button>
+      </div>
+      <div class="vision-bottom">
+        <p id="vision-speaker" class="vision-speaker">Amos</p>
+        <p id="vision-caption" class="vision-caption"></p>
+        <div class="vision-progress-track">
+          <div id="vision-progress-fill"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Places / Fast Travel Drawer -->
+    <section id="places-modal" class="modal-backdrop hidden">
+      <div class="modal-card compact">
+        <div class="modal-header">
+          <div>
+            <h2>Walk to a Place on the Terrace</h2>
+            <p class="modal-sub">Move freely on foot, or glide gently to any landmark in this Vertical Slice.</p>
+          </div>
+          <button class="icon-close modal-close">Close ×</button>
+        </div>
+        <div class="places-grid">
+          <button class="place-btn" data-teleport="amos">
+            <strong>Amos &amp; Arrival Meadow</strong>
+            <span>Zone 1/2 · Living grass &amp; banked golden light</span>
+          </button>
+          <button class="place-btn" data-teleport="orchard">
+            <strong>The Walled Orchard (Mara &amp; Thomas)</strong>
+            <span>Zone 3 · Trees of Life &amp; Healing Leaves</span>
+          </button>
+          <button class="place-btn" data-teleport="pool">
+            <strong>Golden Pool of Living Memory (Elias)</strong>
+            <span>Zone 5 · Launch Creation, Cross &amp; Sawdust Visions</span>
+          </button>
+          <button class="place-btn" data-teleport="mist">
+            <strong>The Fork &amp; Edge of the Gray Mist</strong>
+            <span>Zone 1 East · Unchained witness to free will</span>
+          </button>
+          <button class="place-btn" data-teleport="overlook">
+            <strong>The Rising Road Overlook</strong>
+            <span>Zone 7 Horizon · Eastern Gate of One Pearl</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Visual Art Bible Modal (All 15 Reference Plates) -->
+    <section id="art-bible-modal" class="modal-backdrop hidden">
+      <div class="modal-card wide">
+        <div class="modal-header">
+          <div>
+            <h2>Visual Art Bible &amp; UE5 Look-Dev Reference</h2>
+            <p class="modal-sub">
+              All 15 canonical reference plates from <em>The Waiting Room of the Saints</em> film adaptation,
+              guiding both this WebGL Vertical Slice and the flagship Unreal Engine 5 release.
+            </p>
+          </div>
+          <button class="icon-close modal-close">Close ×</button>
+        </div>
+        <div id="plates-grid" class="plates-grid"></div>
+      </div>
+    </section>
+
+    <!-- Plate Lightbox -->
+    <section id="lightbox" class="modal-backdrop hidden">
+      <div class="lightbox-card">
+        <button id="btn-close-lightbox" class="icon-close lightbox-close">Close ×</button>
+        <img id="lb-img" src="" alt="" />
+        <div class="lb-meta">
+          <span id="lb-num" class="lb-badge"></span>
+          <h3 id="lb-title"></h3>
+          <p id="lb-zone" class="lb-zone"></p>
+          <p id="lb-summary"></p>
+          <p id="lb-ue5" class="lb-ue5"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- UE5 Flagship Roadmap Modal -->
+    <section id="roadmap-modal" class="modal-backdrop hidden">
+      <div class="modal-card compact">
+        <div class="modal-header">
+          <div>
+            <h2>Hybrid Launch Architecture &amp; UE5 Roadmap</h2>
+            <p class="modal-sub">Two complementary tracks bringing Heaven Encounter to players worldwide.</p>
+          </div>
+          <button class="icon-close modal-close">Close ×</button>
+        </div>
+        <div class="roadmap-body">
+          <div class="roadmap-item">
+            <h3>Track 1 — Live Browser Vertical Slice (You Are Playing It!)</h3>
+            <p>
+              Hosted on <strong>GitHub + Cloudflare Pages</strong> with zero downloads required. Readers of
+              <em>The Waiting Room of the Saints</em> and viewers of the 43-minute film can immediately walk
+              the Terrace, breathe the Healing Leaves, and experience 360° Guided Visions right in any browser.
+            </p>
+          </div>
+          <div class="roadmap-item">
+            <h3>Track 2 — Flagship Unreal Engine 5 Release (PC / Console)</h3>
+            <p>
+              Full cinema-grade fidelity powered by <strong>Lumen, Nanite, Niagara, MetaHumans, and MetaSounds</strong>
+              across all 7 Zones—from the Arrival Meadow and Weaving Grounds (Corinne) to the Treasuries
+              (<em>Dimming Gold</em>), Eastern Gate of One Pearl, Street of Transparent Gold, and Sapphire Sea of Glass.
+            </p>
+            <ul>
+              <li><strong>Early Beta Distribution:</strong> itch.io (private &amp; public playable UE5 demos)</li>
+              <li><strong>Full Storefront Launch:</strong> Steam &amp; Epic Games Store (0% UE royalty on EGS)</li>
+              <li><strong>Protected Peace:</strong> Strictly single-player at launch; optional invite-only co-op in Phase 2</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
