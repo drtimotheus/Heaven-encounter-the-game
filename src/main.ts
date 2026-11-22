@@ -3,9 +3,19 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
+import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { TerraceWorld, InteractablePoint } from './world/TerraceWorld';
+import {
+  GraphicsQuality,
+  loadGraphicsQuality,
+  loadWorldGraphics,
+  saveGraphicsQuality,
+  saintArchetype
+} from './world/graphics';
 import { GuidedVisionController, VisionKind } from './world/GuidedVisions';
-import { DIALOGUES, DialogueNode } from './data/dialogues';
+import { DIALOGUES, DialogueChoice, DialogueNode, auditDialogueCanon } from './data/dialogues';
 import { REFERENCE_PLATES } from './data/plates';
 import { HeavenlySoundscape } from './audio/Soundscape';
 
@@ -16,23 +26,46 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 1.02;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0xf5e5c4, 0.0085);
+scene.fog = new THREE.FogExp2(0xf7ead0, 0.0062);
 
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 350);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
+let graphicsQuality: GraphicsQuality = loadGraphicsQuality();
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.38,
-  0.65,
-  0.76
+  0.22,
+  0.48,
+  0.86
 );
-composer.addPass(bloomPass);
+let composer = new EffectComposer(renderer);
+
+function rebuildComposer(): void {
+  const pixelCap = graphicsQuality === 'high' ? 1.75 : graphicsQuality === 'medium' ? 1.25 : 1;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelCap));
+  composer = new EffectComposer(renderer);
+  // SSAOPass only blends occlusion onto an existing beauty buffer.
+  composer.addPass(new RenderPass(scene, camera));
+  if (graphicsQuality !== 'low') {
+    const ssao = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
+    ssao.kernelRadius = graphicsQuality === 'high' ? 8 : 5;
+    ssao.minDistance = 0.0015;
+    ssao.maxDistance = 0.08;
+    composer.addPass(ssao);
+  }
+  if (graphicsQuality === 'high') {
+    composer.addPass(new BokehPass(scene, camera, { focus: 9.5, aperture: 0.00005, maxblur: 0.0035 }));
+  }
+  bloomPass.strength = graphicsQuality === 'low' ? 0.12 : 0.18;
+  composer.addPass(bloomPass);
+  composer.addPass(new OutputPass());
+  composer.setSize(window.innerWidth, window.innerHeight);
+  terrace.setShadowQuality(graphicsQuality);
+}
 
 // --- World & Visions ---
 const terrace = new TerraceWorld();
@@ -52,6 +85,7 @@ let yaw = 0; // looking north (-Z) toward Terrace & Pearl Gate
 let pitch = -0.04;
 let activeInteractable: InteractablePoint | null = null;
 let currentDialogue: DialogueNode | null = null;
+let choiceFocus = 0;
 
 // Seated camera smoothing
 let seatTargetPos: THREE.Vector3 | null = null;
@@ -67,6 +101,69 @@ const eyesProgress = {
 
 function eyesCount(): number {
   return (eyesProgress.fellowship ? 1 : 0) + (eyesProgress.leaves ? 1 : 0) + (eyesProgress.vision ? 1 : 0);
+}
+
+const canonProblems = auditDialogueCanon();
+if (canonProblems.length) {
+  console.error('Heaven Encounter canon audit:', canonProblems);
+}
+
+type AccessSettings = {
+  reduceGlow: boolean;
+  lookSensitivity: number;
+  textScale: number;
+  subtitleBg: boolean;
+};
+
+const access: AccessSettings = {
+  reduceGlow: false,
+  lookSensitivity: 1,
+  textScale: 1,
+  subtitleBg: true
+};
+
+function baseBloom(): number {
+  const qualityBloom = graphicsQuality === 'low' ? 0.12 : graphicsQuality === 'medium' ? 0.18 : 0.22;
+  return access.reduceGlow ? qualityBloom * 0.45 : qualityBloom;
+}
+
+function loadAccess(): void {
+  try {
+    const raw = localStorage.getItem('he-access');
+    if (!raw) return;
+    const saved = JSON.parse(raw) as Partial<AccessSettings>;
+    if (typeof saved.reduceGlow === 'boolean') access.reduceGlow = saved.reduceGlow;
+    if (typeof saved.lookSensitivity === 'number') access.lookSensitivity = saved.lookSensitivity;
+    if (typeof saved.textScale === 'number') access.textScale = saved.textScale;
+    if (typeof saved.subtitleBg === 'boolean') access.subtitleBg = saved.subtitleBg;
+  } catch {
+    /* keep defaults */
+  }
+}
+
+function applyAccess(): void {
+  document.documentElement.style.setProperty('--text-scale', String(access.textScale));
+  document.body.classList.toggle('reduce-glow', access.reduceGlow);
+  document.body.classList.toggle('subtitle-bg', access.subtitleBg);
+  document.body.classList.toggle('subtitle-plain', !access.subtitleBg);
+  visions.setReduceGlow(access.reduceGlow);
+  if (mode !== 'vision') bloomPass.strength = baseBloom();
+  const glowToggle = document.getElementById('opt-reduce-glow') as HTMLInputElement | null;
+  const sens = document.getElementById('opt-sensitivity') as HTMLInputElement | null;
+  const sensLabel = document.getElementById('opt-sensitivity-value');
+  const subs = document.getElementById('opt-subtitles') as HTMLInputElement | null;
+  if (glowToggle) glowToggle.checked = access.reduceGlow;
+  if (sens) sens.value = String(access.lookSensitivity);
+  if (sensLabel) sensLabel.textContent = access.lookSensitivity.toFixed(2);
+  if (subs) subs.checked = access.subtitleBg;
+  document.querySelectorAll<HTMLButtonElement>('[data-text-scale]').forEach((btn) => {
+    btn.classList.toggle('is-selected', Number(btn.dataset.textScale) === access.textScale);
+  });
+}
+
+function saveAccess(): void {
+  localStorage.setItem('he-access', JSON.stringify(access));
+  applyAccess();
 }
 
 // --- DOM References ---
@@ -121,6 +218,12 @@ function updateEyesUI(): void {
   document.getElementById('eye-fellowship')?.classList.toggle('opened', eyesProgress.fellowship);
   document.getElementById('eye-leaves')?.classList.toggle('opened', eyesProgress.leaves);
   document.getElementById('eye-vision')?.classList.toggle('opened', eyesProgress.vision);
+  document.getElementById('btn-place-overlook')?.classList.toggle('hidden', eyesCount() < 2);
+}
+
+function setMode(next: Mode): void {
+  mode = next;
+  document.body.dataset.mode = next;
 }
 
 // --- Build Visual Art Bible Gallery (All 15 Reference Plates) ---
@@ -166,6 +269,14 @@ window.addEventListener('keydown', (e) => {
   } else if (mode === 'dialogue') {
     if (k === 'escape') {
       closeDialogue();
+    } else if (k === 'arrowdown' || k === 'arrowup' || k === 'tab') {
+      e.preventDefault();
+      const backward = k === 'arrowup' || (k === 'tab' && e.shiftKey);
+      moveChoiceFocus(backward ? -1 : 1);
+    } else if ((k === 'enter' || k === ' ') && currentDialogue) {
+      e.preventDefault();
+      const choice = currentDialogue.choices[choiceFocus];
+      if (choice) handleChoice(choice);
     } else if (currentDialogue && ['1', '2', '3', '4'].includes(k)) {
       const idx = parseInt(k, 10) - 1;
       const choice = currentDialogue.choices[idx];
@@ -192,14 +303,19 @@ window.addEventListener('mouseup', () => {
   isDragging = false;
 });
 
+function applyLook(dx: number, dy: number, scaleX: number, scaleY: number): void {
+  const sens = access.lookSensitivity;
+  yaw -= dx * scaleX * sens;
+  pitch = THREE.MathUtils.clamp(pitch - dy * scaleY * sens, -1.05, 1.05);
+}
+
 window.addEventListener('mousemove', (e) => {
   if (!isDragging || (mode !== 'explore' && mode !== 'vision')) return;
   const dx = e.clientX - lastMouseX;
   const dy = e.clientY - lastMouseY;
   lastMouseX = e.clientX;
   lastMouseY = e.clientY;
-  yaw -= dx * 0.0042;
-  pitch = THREE.MathUtils.clamp(pitch - dy * 0.0035, -1.05, 1.05);
+  applyLook(dx, dy, 0.0042, 0.0035);
 });
 
 // Touch look support
@@ -217,22 +333,99 @@ canvas.addEventListener('touchmove', (e) => {
     const dy = e.touches[0].clientY - lastTouchY;
     lastTouchX = e.touches[0].clientX;
     lastTouchY = e.touches[0].clientY;
-    yaw -= dx * 0.005;
-    pitch = THREE.MathUtils.clamp(pitch - dy * 0.004, -1.0, 1.0);
+    applyLook(dx, dy, 0.005, 0.004);
   }
 }, { passive: true });
+
+// On-screen walk stick for phones. Camera look stays a drag on the canvas.
+const stick = { x: 0, y: 0 };
+const joystick = document.getElementById('joystick');
+const joystickKnob = document.getElementById('joystick-knob');
+const STICK_RADIUS = 46;
+let stickPointer: number | null = null;
+
+function setStickFromEvent(clientX: number, clientY: number): void {
+  if (!joystick) return;
+  const rect = joystick.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  let dx = clientX - cx;
+  let dy = clientY - cy;
+  const len = Math.hypot(dx, dy) || 1;
+  const clamped = Math.min(STICK_RADIUS, len);
+  dx = (dx / len) * clamped;
+  dy = (dy / len) * clamped;
+  stick.x = dx / STICK_RADIUS;
+  stick.y = dy / STICK_RADIUS;
+  if (joystickKnob) joystickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+}
+
+function resetStick(): void {
+  stick.x = 0;
+  stick.y = 0;
+  stickPointer = null;
+  if (joystickKnob) joystickKnob.style.transform = 'translate(0px, 0px)';
+}
+
+joystick?.addEventListener('pointerdown', (e) => {
+  stickPointer = e.pointerId;
+  joystick.setPointerCapture(e.pointerId);
+  setStickFromEvent(e.clientX, e.clientY);
+  e.preventDefault();
+});
+joystick?.addEventListener('pointermove', (e) => {
+  if (stickPointer !== e.pointerId) return;
+  setStickFromEvent(e.clientX, e.clientY);
+});
+joystick?.addEventListener('pointerup', resetStick);
+joystick?.addEventListener('pointercancel', resetStick);
+
+const gamepadMove = new THREE.Vector2();
+let gamepadLatch = false;
+
+function pollGamepad(): void {
+  gamepadMove.set(0, 0);
+  const pads = navigator.getGamepads?.();
+  if (!pads) return;
+  let pad: Gamepad | null = null;
+  for (const candidate of pads) {
+    if (candidate) pad = candidate;
+  }
+  if (!pad) return;
+  const dead = 0.2;
+  const ax = Math.abs(pad.axes[0] || 0) > dead ? pad.axes[0] : 0;
+  const ay = Math.abs(pad.axes[1] || 0) > dead ? pad.axes[1] : 0;
+  gamepadMove.set(ax, ay);
+  const lx = Math.abs(pad.axes[2] || 0) > dead ? pad.axes[2] : 0;
+  const ly = Math.abs(pad.axes[3] || 0) > dead ? pad.axes[3] : 0;
+  if (mode === 'explore' || mode === 'vision') {
+    applyLook(lx, ly, 1.8, 1.2);
+  }
+  const pressed = Boolean(pad.buttons[0]?.pressed);
+  if (pressed && !gamepadLatch) {
+    if (mode === 'explore' && activeInteractable) triggerInteraction(activeInteractable);
+    else if (mode === 'dialogue' && currentDialogue) {
+      const choice = currentDialogue.choices[choiceFocus];
+      if (choice) handleChoice(choice);
+    }
+  }
+  gamepadLatch = pressed;
+}
 
 // --- Interaction, Dialogue & Guided Vision Flows ---
 function triggerInteraction(point: InteractablePoint): void {
   soundscape.playChime(point.type === 'leaves' ? 'leaves' : 'interact');
+
+  if (point.type === 'overlook' && eyesCount() < 2) {
+    openDialogue('overlook_locked');
+    return;
+  }
 
   if (point.type === 'leaves') {
     breatheHealingLeaves();
   }
 
   if (point.type === 'saint') {
-    eyesProgress.fellowship = true;
-    updateEyesUI();
     terrace.setActiveSaintConversation(point.id);
   }
 
@@ -253,11 +446,11 @@ function breatheHealingLeaves(): void {
   updateEyesUI();
   terrace.triggerHealingLeafWave(playerPos.clone());
   soundscape.playChime('leaves');
-  gloryVeil.style.opacity = '0.52';
+  gloryVeil.style.opacity = access.reduceGlow ? '0.1' : '0.22';
   window.setTimeout(() => {
     gloryVeil.style.opacity = '0';
   }, 900);
-  showWhisper('You breathe the leaves of the Tree of Life. The poison leaves the memory; the scar can stand in the sun.');
+  showWhisper('You breathe the leaves of the Tree of Life. Every memory shines in the light of grace.');
 }
 
 function openDialogue(nodeId: string): void {
@@ -267,7 +460,7 @@ function openDialogue(nodeId: string): void {
     return;
   }
   currentDialogue = node;
-  mode = 'dialogue';
+  setMode('dialogue');
   interactPrompt.classList.add('hidden');
   dialoguePanel.classList.remove('hidden');
 
@@ -279,18 +472,37 @@ function openDialogue(nodeId: string): void {
   node.choices.forEach((choice, idx) => {
     const btn = document.createElement('button');
     btn.className = 'choice-btn';
+    btn.type = 'button';
     btn.textContent = `${idx + 1}. ${choice.label}`;
     btn.addEventListener('click', () => handleChoice(choice));
+    btn.addEventListener('focus', () => {
+      choiceFocus = idx;
+    });
     dlgChoices.appendChild(btn);
   });
+  choiceFocus = 0;
+  const firstChoice = dlgChoices.querySelector('button');
+  if (firstChoice instanceof HTMLButtonElement) firstChoice.focus();
 }
 
-function handleChoice(choice: DialogueNode['choices'][number]): void {
+function moveChoiceFocus(delta: number): void {
+  const buttons = [...dlgChoices.querySelectorAll('button')];
+  if (!buttons.length) return;
+  choiceFocus = (choiceFocus + delta + buttons.length) % buttons.length;
+  const target = buttons[choiceFocus];
+  if (target instanceof HTMLButtonElement) target.focus();
+}
+
+function handleChoice(choice: DialogueChoice): void {
   if (choice.action === 'breathe-leaves') {
     breatheHealingLeaves();
-  } else if (choice.action === 'mark-healed') {
+  } else if (choice.action === 'complete-fellowship') {
+    const before = eyesCount();
     eyesProgress.fellowship = true;
     updateEyesUI();
+    if (before < 2 && eyesCount() >= 2) {
+      showWhisper('Your eyes have grown for greater glory. The Rising Road Overlook to the north now stands clear.');
+    }
   } else if (choice.action === 'vision-creation') {
     closeDialogue();
     startVision('creation');
@@ -321,15 +533,15 @@ function closeDialogue(): void {
     seatTargetPos = null;
     seatTargetLook = null;
   }
-  mode = 'explore';
+  setMode('explore');
 }
 
 function startVision(kind: VisionKind): void {
-  gloryVeil.style.opacity = '0.95';
+  gloryVeil.style.opacity = access.reduceGlow ? '0.35' : '0.62';
   soundscape.playChime('vision-start');
 
   window.setTimeout(() => {
-    mode = 'vision';
+    setMode('vision');
     terrace.group.visible = false;
     scene.fog = null;
     const spec = visions.start(kind);
@@ -342,7 +554,7 @@ function startVision(kind: VisionKind): void {
     camera.position.set(0, 1.6, 4);
     yaw = 0;
     pitch = 0.08;
-    bloomPass.strength = 0.72;
+    bloomPass.strength = access.reduceGlow ? 0.08 : 0.16;
 
     gloryVeil.style.opacity = '0';
   }, 550);
@@ -356,13 +568,13 @@ function exitVision(): void {
   window.setTimeout(() => {
     visions.stop();
     terrace.group.visible = true;
-    scene.fog = new THREE.FogExp2(0xf5e5c4, 0.0085);
+    scene.fog = new THREE.FogExp2(0xf7ead0, 0.0062);
     scene.background = null;
-    bloomPass.strength = 0.38;
+    bloomPass.strength = baseBloom();
     visionHud.classList.add('hidden');
     hud.classList.remove('hidden');
     controlsBar.classList.remove('hidden');
-    mode = 'explore';
+    setMode('explore');
     gloryVeil.style.opacity = '0';
 
     if (eyesCount() >= 2) {
@@ -381,8 +593,8 @@ document.getElementById('btn-play')!.addEventListener('click', () => {
   titleScreen.classList.add('hidden');
   hud.classList.remove('hidden');
   controlsBar.classList.remove('hidden');
-  mode = 'explore';
-  showWhisper('Walk gently. Amos waits just ahead on the sunlit Terrace, and the Walled Orchard lies across the river.');
+  setMode('explore');
+  showWhisper('Walk gently. Amos waits just ahead on the sunlit Terrace. Mara keeps the orchard, Elias the Pool, and Paul is by the bridge.');
 });
 
 document.getElementById('btn-menu')!.addEventListener('click', () => {
@@ -393,7 +605,7 @@ document.getElementById('btn-menu')!.addEventListener('click', () => {
   interactPrompt.classList.add('hidden');
   titleScreen.classList.remove('hidden');
   titleScreen.classList.add('active');
-  mode = 'title';
+  setMode('title');
 });
 
 document.getElementById('btn-mute')!.addEventListener('click', (e) => {
@@ -419,6 +631,7 @@ document.querySelectorAll('.modal-close').forEach((btn) => {
     placesModal.classList.add('hidden');
     artBibleModal.classList.add('hidden');
     roadmapModal.classList.add('hidden');
+    document.getElementById('access-modal')?.classList.add('hidden');
   });
 });
 
@@ -435,14 +648,41 @@ const TELEPORTS: Record<string, { x: number; z: number; yaw: number }> = {
   john_isaiah: { x: 0.1, z: -13.6, yaw: 0.0 }
 };
 
+function placePlayer(x: number, z: number, faceX?: number, faceZ?: number, fixedYaw?: number): void {
+  playerPos.set(x, terrace.getGroundHeight(x, z) + 1.72, z);
+  if (faceX !== undefined && faceZ !== undefined) {
+    yaw = Math.atan2(-(faceX - x), -(faceZ - z));
+  } else if (fixedYaw !== undefined) {
+    yaw = fixedYaw;
+  }
+  pitch = -0.08;
+  soundscape.playChime('stillness');
+}
+
+/** Stand inside the saint's interact radius, facing them. */
+function teleportBeside(saintId: string, offsetX: number, offsetZ: number): void {
+  const agent = terrace.saintAgents.get(saintId);
+  if (!agent) return;
+  const p = agent.group.position;
+  placePlayer(p.x + offsetX, p.z + offsetZ, p.x, p.z);
+}
+
 document.querySelectorAll<HTMLButtonElement>('.place-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    const dest = TELEPORTS[btn.dataset.teleport || 'amos'];
-    if (dest) {
-      playerPos.set(dest.x, terrace.getGroundHeight(dest.x, dest.z) + 1.72, dest.z);
-      yaw = dest.yaw;
-      pitch = -0.02;
-      soundscape.playChime('stillness');
+    const key = btn.dataset.teleport || 'amos';
+    if (key === 'overlook' && eyesCount() < 2) {
+      showWhisper("The light ahead is bright. Sit a while longer on the Terrace; it'll be ready for you.");
+      placesModal.classList.add('hidden');
+      return;
+    }
+    if (key === 'amos') {
+      teleportBeside('amos', 1.35, 1.45);
+    } else if (key === 'orchard') {
+      // West and south of Mara, outside Mary Magdalene's radius.
+      teleportBeside('mara', -1.55, -1.15);
+    } else {
+      const dest = TELEPORTS[key];
+      if (dest) placePlayer(dest.x, dest.z, undefined, undefined, dest.yaw);
     }
     placesModal.classList.add('hidden');
   });
@@ -511,14 +751,16 @@ function updateAmbientWisps(): void {
 function animate(): void {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
+  pollGamepad();
   const elapsed = clock.getElapsedTime();
   gloryWarnCooldown = Math.max(0, gloryWarnCooldown - dt);
   davidHarpCooldown = Math.max(0, davidHarpCooldown - dt);
 
   if (mode === 'title') {
     // Gentle aerial drift over the sunlit Terrace & Eastern Gate skyline
-    const angle = elapsed * 0.09;
-    camera.position.set(Math.sin(angle) * 16, 7.2 + Math.sin(elapsed * 0.25) * 0.8, 17 + Math.cos(angle) * 6);
+    const drift = access.reduceGlow ? 0.35 : Math.min(1, access.lookSensitivity);
+    const angle = elapsed * 0.09 * drift;
+    camera.position.set(Math.sin(angle) * 16, 7.2 + Math.sin(elapsed * 0.25 * drift) * 0.8, 17 + Math.cos(angle) * 6);
     camera.lookAt(0, 2.2, -16);
     terrace.update(dt, elapsed, playerPos);
   } else if (mode === 'explore') {
@@ -531,21 +773,29 @@ function animate(): void {
     if (keys.has('s') || keys.has('arrowdown')) move.sub(forward);
     if (keys.has('d') || keys.has('arrowright')) move.add(right);
     if (keys.has('a') || keys.has('arrowleft')) move.sub(right);
+    if (stick.x !== 0 || stick.y !== 0 || gamepadMove.lengthSq() > 0) {
+      move.add(forward.clone().multiplyScalar(-stick.y - gamepadMove.y));
+      move.add(right.clone().multiplyScalar(stick.x + gamepadMove.x));
+    }
 
-    // Diegetic "Weight of Glory" near the northern Rising Road if eyes haven't adjusted yet
+    // A gentle weight near the Rising Road until two Growing Eyes milestones are kept.
+    // Bloom and the veil stay capped so the overlook never washes out to white.
     let speed = 6.2;
     if (playerPos.z < -20.5 && eyesCount() < 2) {
       const depth = Math.min(1, (-20.5 - playerPos.z) / 5.5);
-      bloomPass.strength = 0.38 + depth * 1.15;
-      gloryVeil.style.opacity = String(depth * 0.55);
-      speed = 6.2 * (1 - depth * 0.65);
+      const bloomLo = baseBloom();
+      const bloomHi = access.reduceGlow ? 0.16 : 0.42;
+      bloomPass.strength = bloomLo + depth * (bloomHi - bloomLo);
+      gloryVeil.style.opacity = String(depth * (access.reduceGlow ? 0.05 : 0.14));
+      speed = 6.2 * (1 - depth * 0.45);
       if (depth > 0.72 && gloryWarnCooldown <= 0) {
         gloryWarnCooldown = 6;
-        showWhisper('Amos: "No rush, friend—the noon glory is heavy yet. Rest with Mara in the Orchard or gaze into the Golden Pool first."');
+        showWhisper('Amos: "No rush, friend—the noon glory is still bright. Sit with Mara in the Orchard, or gaze into the Golden Pool first."');
       }
       if (playerPos.z < -25.2) playerPos.z = -25.2;
     } else {
-      bloomPass.strength += (0.38 - bloomPass.strength) * Math.min(1, dt * 3);
+      const targetBloom = baseBloom();
+      bloomPass.strength += (targetBloom - bloomPass.strength) * Math.min(1, dt * 3);
       if (gloryVeil.style.opacity !== '0' && parseFloat(gloryVeil.style.opacity || '0') < 0.6) {
         gloryVeil.style.opacity = '0';
       }
@@ -586,8 +836,13 @@ function animate(): void {
     }
     activeInteractable = nearest;
     if (nearest) {
-      promptLabel.textContent = nearest.label;
-      promptSublabel.textContent = nearest.sublabel;
+      if (nearest.type === 'overlook' && eyesCount() < 2) {
+        promptLabel.textContent = 'Rising Road Overlook';
+        promptSublabel.textContent = 'Not yet. Finish two testimonies of grace, then the light will be ready.';
+      } else {
+        promptLabel.textContent = nearest.label;
+        promptSublabel.textContent = nearest.sublabel;
+      }
       interactPrompt.classList.remove('hidden');
     } else {
       interactPrompt.classList.add('hidden');
@@ -631,5 +886,56 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
 });
+
+const accessModal = document.getElementById('access-modal')!;
+document.getElementById('btn-access')!.addEventListener('click', () => accessModal.classList.remove('hidden'));
+document.getElementById('btn-access-title')!.addEventListener('click', () => accessModal.classList.remove('hidden'));
+document.getElementById('opt-reduce-glow')!.addEventListener('change', (e) => {
+  access.reduceGlow = (e.currentTarget as HTMLInputElement).checked;
+  saveAccess();
+});
+document.getElementById('opt-subtitles')!.addEventListener('change', (e) => {
+  access.subtitleBg = (e.currentTarget as HTMLInputElement).checked;
+  saveAccess();
+});
+document.getElementById('opt-sensitivity')!.addEventListener('input', (e) => {
+  access.lookSensitivity = Number((e.currentTarget as HTMLInputElement).value);
+  saveAccess();
+});
+document.querySelectorAll<HTMLButtonElement>('[data-text-scale]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    access.textScale = Number(btn.dataset.textScale);
+    saveAccess();
+  });
+});
+
+loadAccess();
+applyAccess();
+setMode('title');
+updateEyesUI();
+rebuildComposer();
+
+document.querySelectorAll<HTMLButtonElement>('[data-gfx]').forEach((btn) => {
+  btn.classList.toggle('is-selected', btn.dataset.gfx === graphicsQuality);
+  btn.addEventListener('click', () => {
+    const next = btn.dataset.gfx;
+    if (next !== 'low' && next !== 'medium' && next !== 'high') return;
+    saveGraphicsQuality(next);
+    window.location.reload();
+  });
+});
+
+loadWorldGraphics(renderer, graphicsQuality)
+  .then((gfx) => {
+    scene.environment = gfx.envMap;
+    scene.environmentIntensity = gfx.envIntensity;
+    terrace.applyPbr(gfx);
+    terrace.saintAgents.forEach((agent) => {
+      agent.mountRig(gfx.characters[saintArchetype(agent.profile)]);
+    });
+  })
+  .catch((err) => {
+    console.error('Graphics upgrade failed; keeping the simple terrace.', err);
+  });
 
 animate();

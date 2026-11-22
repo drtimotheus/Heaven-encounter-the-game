@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { AMBIENT_BANTER_PAIRS, SAINTS } from '../data/dialogues';
 import { SaintAgent } from './SaintAgent';
+import type { GraphicsQuality, WorldGraphics } from './graphics';
 
 export interface InteractablePoint {
   id: string;
@@ -30,7 +31,18 @@ export class TerraceWorld {
   public readonly interactables: InteractablePoint[] = [];
 
   private grassMaterial!: THREE.ShaderMaterial;
-  private waterMaterial!: THREE.ShaderMaterial;
+  private grassMesh!: THREE.InstancedMesh;
+  private waterMaterial!: THREE.Material;
+  private waterMesh!: THREE.Mesh;
+  private seaMesh!: THREE.Mesh;
+  private riverNormal: THREE.Texture | null = null;
+  private terrainMat!: THREE.MeshStandardMaterial;
+  private stoneMat!: THREE.MeshStandardMaterial;
+  private marbleMat!: THREE.MeshStandardMaterial;
+  private woodMat!: THREE.MeshStandardMaterial;
+  private barkMat!: THREE.MeshStandardMaterial;
+  private wallMat!: THREE.MeshStandardMaterial;
+  private readonly trees: { group: THREE.Group; scale: number; healing: boolean }[] = [];
   private poolMaterial!: THREE.ShaderMaterial;
   private pearlMaterial!: THREE.ShaderMaterial;
   private birds: PrismaticBird[] = [];
@@ -55,6 +67,146 @@ export class TerraceWorld {
     this.buildPrismaticBirds();
     this.buildSaintsAndBenches();
     this.buildHealingLeafBurst();
+  }
+
+  public setShadowQuality(quality: GraphicsQuality): void {
+    const size = quality === 'high' ? 2048 : quality === 'medium' ? 1024 : 512;
+    this.sunLight.shadow.mapSize.set(size, size);
+    this.sunLight.shadow.radius = quality === 'low' ? 1 : 3.2;
+    if (this.sunLight.shadow.map) {
+      this.sunLight.shadow.map.dispose();
+      this.sunLight.shadow.map = null;
+    }
+  }
+
+  /** Swap flat colors for CC0 PBR maps, physical water, and leaf-card canopies. */
+  public applyPbr(gfx: WorldGraphics): void {
+    const normals = gfx.quality !== 'low';
+    const paint = (
+      mat: THREE.MeshStandardMaterial,
+      map: THREE.Texture,
+      normal?: THREE.Texture,
+      rough?: THREE.Texture
+    ) => {
+      mat.map = map;
+      mat.normalMap = normals && normal ? normal : null;
+      mat.roughnessMap = rough ?? null;
+      mat.color.set(0xffffff);
+      mat.needsUpdate = true;
+    };
+
+    paint(this.terrainMat, gfx.grass.map, gfx.grass.normal, gfx.grass.rough);
+    this.terrainMat.color.set(0xe4f6c2);
+    this.terrainMat.normalScale.set(0.65, 0.65);
+    this.terrainMat.onBeforeCompile = (shader) => {
+      shader.uniforms.uSand = { value: gfx.sand.map };
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform sampler2D uSand;')
+        .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+           vec3 sandCol = texture2D(uSand, vMapUv * 0.5).rgb;
+           float sandMix = smoothstep(0.48, 0.2, vColor.g);
+           diffuseColor.rgb = mix(diffuseColor.rgb, sandCol, sandMix);
+           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.84, 0.4), 0.22 * (1.0 - sandMix));`
+        );
+    };
+    this.group.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || mesh.material !== this.terrainMat) return;
+      const attr = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+      for (let i = 0; i < attr.count; i++) {
+        attr.setXYZ(
+          i,
+          THREE.MathUtils.lerp(attr.getX(i), 1, 0.58),
+          THREE.MathUtils.lerp(attr.getY(i), 1, 0.5),
+          THREE.MathUtils.lerp(attr.getZ(i), 1, 0.68)
+        );
+      }
+      attr.needsUpdate = true;
+    });
+
+    paint(this.stoneMat, gfx.marble.map, gfx.marble.normal, gfx.marble.rough);
+    paint(this.wallMat, gfx.marble.map, gfx.marble.normal, gfx.marble.rough);
+    paint(this.marbleMat, gfx.marble.map, gfx.marble.normal, gfx.marble.rough);
+    paint(this.barkMat, gfx.bark.map, gfx.bark.normal);
+    paint(this.woodMat, gfx.wood.map, gfx.wood.normal);
+    this.wallMat.color.set(0xfff4e6);
+    this.marbleMat.color.set(0xfff8ef);
+
+    const seaNormal = gfx.waterNormal.clone();
+    seaNormal.repeat.set(8, 8);
+    this.riverNormal = gfx.waterNormal;
+    const riverMat = new THREE.MeshPhysicalMaterial({
+      color: 0x7ecfc4,
+      roughness: 0.14,
+      metalness: 0.04,
+      transmission: 0.22,
+      thickness: 0.55,
+      ior: 1.33,
+      transparent: true,
+      opacity: 0.9,
+      attenuationColor: new THREE.Color(0x1f8f86),
+      attenuationDistance: 1.4,
+      envMapIntensity: 1.15,
+      normalMap: gfx.waterNormal,
+      normalScale: new THREE.Vector2(0.45, 0.45)
+    });
+    this.waterMesh.material = riverMat;
+    this.waterMaterial = riverMat;
+
+    this.seaMesh.material = new THREE.MeshPhysicalMaterial({
+      color: 0x9fd0f4,
+      roughness: 0.03,
+      metalness: 0.08,
+      transmission: 0.28,
+      thickness: 0.45,
+      ior: 1.33,
+      transparent: true,
+      opacity: 0.92,
+      envMapIntensity: 1.5,
+      normalMap: seaNormal,
+      normalScale: new THREE.Vector2(0.05, 0.05)
+    });
+
+    const leafMat = new THREE.MeshStandardMaterial({
+      map: gfx.leaf,
+      transparent: true,
+      alphaTest: 0.38,
+      roughness: 0.58,
+      side: THREE.DoubleSide,
+      color: 0xf3ffe6
+    });
+    const healingLeaf = leafMat.clone();
+    healingLeaf.emissive = new THREE.Color(0x7cb85a);
+    healingLeaf.emissiveIntensity = 0.16;
+    const card = new THREE.PlaneGeometry(1, 1);
+    for (const tree of this.trees) {
+      const remove: THREE.Object3D[] = [];
+      tree.group.traverse((obj) => {
+        if (obj.userData.kind === 'crown') remove.push(obj);
+      });
+      remove.forEach((obj) => obj.parent?.remove(obj));
+      const mat = tree.healing ? healingLeaf : leafMat;
+      const spots: [number, number, number][] = [
+        [0, 3.45, 0],
+        [0.85, 3.1, 0.4],
+        [-0.8, 3.2, -0.35],
+        [0.1, 4.2, -0.2]
+      ];
+      for (const [x, y, z] of spots) {
+        for (const yaw of [0, Math.PI / 3, (2 * Math.PI) / 3]) {
+          const leaf = new THREE.Mesh(card, mat);
+          leaf.scale.set(1.65 * tree.scale, 1.2 * tree.scale, 1);
+          leaf.position.set(x * tree.scale, y * tree.scale, z * tree.scale);
+          leaf.rotation.y = yaw;
+          leaf.castShadow = gfx.quality !== 'low';
+          tree.group.add(leaf);
+        }
+      }
+    }
+
+    this.grassMesh.count = Math.max(120, Math.floor(this.grassMesh.count * (gfx.quality === 'low' ? 0.4 : 0.62)));
   }
 
   public getGroundHeight(x: number, z: number): number {
@@ -96,7 +248,7 @@ export class TerraceWorld {
         topColor: { value: new THREE.Color(0x5288c4) },
         midColor: { value: new THREE.Color(0xf6d8a8) },
         horizonColor: { value: new THREE.Color(0xfff1cf) },
-        sunDir: { value: new THREE.Vector3(0.0, 0.28, -0.96).normalize() }
+        sunDir: { value: new THREE.Vector3(0.72, 0.48, -0.42).normalize() }
       },
       vertexShader: `
         varying vec3 vWorldPos;
@@ -118,8 +270,8 @@ export class TerraceWorld {
           vec3 col = mix(horizonColor, midColor, smoothstep(0.0, 0.28, h));
           col = mix(col, topColor, smoothstep(0.22, 0.82, h));
           float sunAmt = max(dot(dir, sunDir), 0.0);
-          col += vec3(1.0, 0.94, 0.78) * pow(sunAmt, 14.0) * 0.55;
-          col += vec3(1.0, 0.98, 0.9) * pow(sunAmt, 90.0) * 0.75;
+          col += vec3(1.0, 0.93, 0.72) * pow(sunAmt, 8.0) * 0.22;
+          col += vec3(1.0, 0.97, 0.88) * pow(sunAmt, 64.0) * 0.28;
           gl_FragColor = vec4(col, 1.0);
         }
       `
@@ -129,10 +281,12 @@ export class TerraceWorld {
     const hemi = new THREE.HemisphereLight(0xfff6dc, 0x6ea06e, 1.15);
     this.group.add(hemi);
 
-    this.sunLight = new THREE.DirectionalLight(0xffe9be, 1.75);
-    this.sunLight.position.set(8, 28, -42);
+    this.sunLight = new THREE.DirectionalLight(0xfff1d2, 2.35);
+    this.sunLight.position.set(34, 36, -16);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(2048, 2048);
+    this.sunLight.shadow.radius = 2.5;
+    this.sunLight.shadow.normalBias = 0.035;
     this.sunLight.shadow.camera.near = 5;
     this.sunLight.shadow.camera.far = 120;
     this.sunLight.shadow.camera.left = -45;
@@ -181,12 +335,13 @@ export class TerraceWorld {
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.computeVertexNormals();
 
-    const mat = new THREE.MeshStandardMaterial({
+    this.terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.88,
-      metalness: 0.04
+      roughness: 0.9,
+      metalness: 0.0,
+      color: 0xe7f3c4
     });
-    const terrain = new THREE.Mesh(geo, mat);
+    const terrain = new THREE.Mesh(geo, this.terrainMat);
     terrain.receiveShadow = true;
     this.group.add(terrain);
 
@@ -239,7 +394,8 @@ export class TerraceWorld {
         }
       `
     });
-    const river = new THREE.Mesh(waterGeo, this.waterMaterial);
+    this.waterMesh = new THREE.Mesh(waterGeo, this.waterMaterial);
+    const river = this.waterMesh;
     river.position.y = -0.32;
     this.group.add(river);
   }
@@ -297,7 +453,8 @@ export class TerraceWorld {
       `
     });
 
-    const mesh = new THREE.InstancedMesh(bladeGeo, this.grassMaterial, count);
+    this.grassMesh = new THREE.InstancedMesh(bladeGeo, this.grassMaterial, count);
+    const mesh = this.grassMesh;
     const dummy = new THREE.Object3D();
     let placed = 0;
 
@@ -363,11 +520,12 @@ export class TerraceWorld {
   }
 
   private buildBridgeAndWalkways(): void {
-    const stoneMat = new THREE.MeshStandardMaterial({
+    this.stoneMat = new THREE.MeshStandardMaterial({
       color: 0xf1e5cc,
-      roughness: 0.68,
-      metalness: 0.08
+      roughness: 0.62,
+      metalness: 0.02
     });
+    const stoneMat = this.stoneMat;
     const goldTrimMat = new THREE.MeshStandardMaterial({
       color: 0xf2c96b,
       emissive: 0x5c3e08,
@@ -427,7 +585,8 @@ export class TerraceWorld {
     const cx = -14.5;
     const cz = -9.0;
     const radius = 8.2;
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xede2ca, roughness: 0.78 });
+    this.wallMat = new THREE.MeshStandardMaterial({ color: 0xede2ca, roughness: 0.72 });
+    const wallMat = this.wallMat;
 
     const wallSegments = 22;
     for (let i = 0; i < wallSegments; i++) {
@@ -493,8 +652,8 @@ export class TerraceWorld {
     const treeY = this.getGroundHeight(-14.8, -9.2);
     this.interactables.push({
       id: 'healing-leaves',
-      label: 'Tree of Life — Gather Healing Leaves',
-      sublabel: 'Press E to breathe the leaves of the Walled Orchard',
+      label: 'Mara’s Orchard — Breathe the Healing Leaves',
+      sublabel: 'Press E to breathe the leaves with Mara',
       position: new THREE.Vector3(-14.8, treeY + 1.2, -9.2),
       radius: 3.6,
       type: 'leaves',
@@ -506,8 +665,9 @@ export class TerraceWorld {
     const g = new THREE.Group();
     const y = this.getGroundHeight(x, z);
 
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6f533b, roughness: 0.9 });
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.42 * scale, 3.4 * scale, 8), trunkMat);
+    if (!this.barkMat) this.barkMat = new THREE.MeshStandardMaterial({ color: 0x6f533b, roughness: 0.86 });
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.42 * scale, 3.4 * scale, 10), this.barkMat);
+    trunk.userData.kind = 'trunk';
     trunk.position.y = 1.65 * scale;
     trunk.castShadow = true;
     g.add(trunk);
@@ -527,6 +687,7 @@ export class TerraceWorld {
     ];
     clusterOffsets.forEach(([ox, oy, oz, rad]) => {
       const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(rad * scale, 1), foliageMat);
+      crown.userData.kind = 'crown';
       crown.position.set(ox * scale, oy * scale, oz * scale);
       crown.castShadow = true;
       g.add(crown);
@@ -555,6 +716,7 @@ export class TerraceWorld {
 
     g.position.set(x, y, z);
     this.group.add(g);
+    this.trees.push({ group: g, scale, healing: isHealingTree });
   }
 
   private buildMemoryPavilion(): void {
@@ -565,7 +727,8 @@ export class TerraceWorld {
     const pav = new THREE.Group();
     pav.position.set(px, py, pz);
 
-    const marbleMat = new THREE.MeshStandardMaterial({ color: 0xf7f1e6, roughness: 0.32, metalness: 0.08 });
+    this.marbleMat = new THREE.MeshStandardMaterial({ color: 0xf7f1e6, roughness: 0.32, metalness: 0.04 });
+    const marbleMat = this.marbleMat;
     const goldMat = new THREE.MeshStandardMaterial({
       color: 0xf7cf6b,
       emissive: 0x704d0a,
@@ -761,7 +924,7 @@ export class TerraceWorld {
     const pillarMat = new THREE.MeshBasicMaterial({
       color: 0xfff3c9,
       transparent: true,
-      opacity: 0.24,
+      opacity: 0.14,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false
@@ -773,16 +936,17 @@ export class TerraceWorld {
     // Distant Golden Ring Halo Sanctuary (Sea of Glass motif)
     const halo = new THREE.Mesh(
       new THREE.TorusGeometry(18, 0.65, 16, 64),
-      new THREE.MeshBasicMaterial({ color: 0xffe49e, transparent: true, opacity: 0.72 })
+      new THREE.MeshBasicMaterial({ color: 0xffe49e, transparent: true, opacity: 0.42 })
     );
     halo.position.set(0, 22, -28);
     gateGroup.add(halo);
 
     // Distant Sapphire Sea shimmer plane beyond the gate
-    const sea = new THREE.Mesh(
-      new THREE.CircleGeometry(70, 48),
+    this.seaMesh = new THREE.Mesh(
+      new THREE.CircleGeometry(70, 64),
       new THREE.MeshBasicMaterial({ color: 0x2e7ee0, transparent: true, opacity: 0.55 })
     );
+    const sea = this.seaMesh;
     sea.rotation.x = -Math.PI / 2;
     sea.position.set(0, 2.2, -52);
     gateGroup.add(sea);
@@ -854,7 +1018,8 @@ export class TerraceWorld {
   }
 
   private buildSaintsAndBenches(): void {
-    const woodMat = new THREE.MeshStandardMaterial({ color: 0x9c7b56, roughness: 0.75 });
+    this.woodMat = new THREE.MeshStandardMaterial({ color: 0x9c7b56, roughness: 0.7 });
+    const woodMat = this.woodMat;
     const stoneLegMat = new THREE.MeshStandardMaterial({ color: 0xe9dec8, roughness: 0.65 });
 
     SAINTS.forEach((profile) => {
@@ -955,8 +1120,12 @@ export class TerraceWorld {
       this.grassMaterial.uniforms.uTime.value = elapsed;
       this.grassMaterial.uniforms.uPlayerPos.value.copy(playerPos);
     }
-    if (this.waterMaterial) {
+    if (this.waterMaterial instanceof THREE.ShaderMaterial && this.waterMaterial.uniforms.uTime) {
       this.waterMaterial.uniforms.uTime.value = elapsed;
+    }
+    if (this.riverNormal) {
+      this.riverNormal.offset.x = elapsed * 0.018;
+      this.riverNormal.offset.y = elapsed * 0.01;
     }
     if (this.poolMaterial) {
       this.poolMaterial.uniforms.uTime.value = elapsed;

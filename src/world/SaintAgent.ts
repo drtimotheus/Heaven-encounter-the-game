@@ -1,5 +1,7 @@
 import * as THREE from 'three';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { SaintProfile } from '../data/dialogues';
+import type { CharacterTemplate } from './graphics';
 
 export type AgentState = 'stroll' | 'pair-talk' | 'harp-play' | 'bench-rest' | 'greet' | 'react-leaves' | 'converse-player';
 
@@ -34,6 +36,11 @@ export class SaintAgent {
   // Ambient floating wisp state
   public activeWispText: string | null = null;
   private wispTimer = 0;
+  private mixer: THREE.AnimationMixer | null = null;
+  private actions: Partial<Record<'idle' | 'walk' | 'wave' | 'look_around', THREE.AnimationAction>> = {};
+  private currentClip: 'idle' | 'walk' | 'wave' | 'look_around' = 'idle';
+  private headBone: THREE.Object3D | null = null;
+  private crownUniform: { value: THREE.Vector3 } | null = null;
 
   constructor(profile: SaintProfile, groundY: number) {
     this.profile = profile;
@@ -110,17 +117,32 @@ export class SaintAgent {
     head.castShadow = true;
     this.headGroup.add(head);
 
-    const hair = new THREE.Mesh(
-      new THREE.SphereGeometry(0.21, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.58),
-      hairMat
-    );
-    hair.position.y = 0.19;
-    this.headGroup.add(hair);
+    if (p.balding) {
+      // Bare crown with a graying fringe (Acts of Paul and Thecla tradition).
+      const fringe = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.042, 8, 18), hairMat);
+      fringe.rotation.x = Math.PI / 2.2;
+      fringe.position.set(0, 0.2, -0.012);
+      this.headGroup.add(fringe);
+
+      const nape = new THREE.Mesh(
+        new THREE.SphereGeometry(0.2, 12, 8, Math.PI * 0.2, Math.PI * 1.6, Math.PI * 0.48, Math.PI * 0.42),
+        hairMat
+      );
+      nape.position.set(0, 0.12, -0.02);
+      this.headGroup.add(nape);
+    } else {
+      const hair = new THREE.Mesh(
+        new THREE.SphereGeometry(0.21, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.58),
+        hairMat
+      );
+      hair.position.y = 0.19;
+      this.headGroup.add(hair);
+    }
 
     if (p.hasBeard) {
-      const beard = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.24, 8), hairMat);
+      const beard = new THREE.Mesh(new THREE.ConeGeometry(0.14, p.balding ? 0.14 : 0.24, 8), hairMat);
       beard.rotation.x = Math.PI;
-      beard.position.set(0, 0.01, 0.11);
+      beard.position.set(0, p.balding ? 0.05 : 0.01, 0.11);
       this.headGroup.add(beard);
     }
 
@@ -172,6 +194,9 @@ export class SaintAgent {
     this.haloRing.rotation.x = -Math.PI / 2;
     this.haloRing.position.y = 0.06;
     this.group.add(this.haloRing);
+
+    const scale = p.bodyScale ?? 1;
+    if (scale !== 1) this.group.scale.setScalar(scale);
   }
 
   private attachProp(prop: SaintProfile['prop']): void {
@@ -225,9 +250,103 @@ export class SaintAgent {
   }
 
   public getHeadWorldPos(target = new THREE.Vector3()): THREE.Vector3 {
+    if (this.headBone) {
+      this.headBone.getWorldPosition(target);
+      target.y += 0.22;
+      return target;
+    }
     this.headGroup.getWorldPosition(target);
     target.y += 0.48;
     return target;
+  }
+
+  /** Swap the primitive body for a shared CC0 rig. The template is cloned per saint. */
+  public mountRig(template: CharacterTemplate): void {
+    const model = cloneSkinned(template.scene);
+    model.rotation.y = Math.PI;
+    model.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.frustumCulled = false;
+      }
+    });
+    const box = new THREE.Box3().setFromObject(model);
+    if (Number.isFinite(box.min.y)) model.position.y -= box.min.y;
+    this.group.add(model);
+    this.hips.visible = false;
+
+    this.mixer = new THREE.AnimationMixer(model);
+    const wanted = ['idle', 'walk', 'wave', 'look_around'] as const;
+    for (const name of wanted) {
+      const clip = template.clips.find((c) => c.name === name);
+      if (!clip) continue;
+      const action = this.mixer.clipAction(clip, model);
+      action.loop = THREE.LoopRepeat;
+      this.actions[name] = action;
+    }
+    this.actions.idle?.play();
+    this.currentClip = 'idle';
+
+    model.traverse((obj) => {
+      if (obj.name === 'head') this.headBone = obj;
+    });
+    if (this.profile.balding && this.headBone) {
+      this.addBalding(model);
+    }
+  }
+
+  private addBalding(model: THREE.Object3D): void {
+    const crown = { value: new THREE.Vector3() };
+    this.crownUniform = crown;
+    model.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh || !mesh.material) return;
+      const source = mesh.material as THREE.MeshStandardMaterial;
+      if (!source.isMeshStandardMaterial) return;
+      const material = source.clone();
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.uCrown = crown;
+        shader.vertexShader = shader.vertexShader
+          .replace('#include <common>', '#include <common>\nvarying vec3 vSaintWorld;')
+          .replace(
+            '#include <project_vertex>',
+            'vSaintWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#include <project_vertex>'
+          );
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <common>', '#include <common>\nvarying vec3 vSaintWorld;\nuniform vec3 uCrown;')
+          .replace(
+            '#include <color_fragment>',
+            `#include <color_fragment>
+             float crownDist = distance(vSaintWorld.xz, uCrown.xz);
+             float crownH = smoothstep(uCrown.y - 0.08, uCrown.y + 0.01, vSaintWorld.y);
+             float bald = (1.0 - smoothstep(0.04, 0.11, crownDist)) * crownH;
+             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.61, 0.47), bald);`
+          );
+      };
+      mesh.material = material;
+    });
+
+    const hair = new THREE.MeshStandardMaterial({ color: this.profile.hairColor, roughness: 0.7 });
+    const skin = new THREE.MeshStandardMaterial({ color: this.profile.skinColor, roughness: 0.52 });
+    const scalp = new THREE.Mesh(new THREE.SphereGeometry(0.105, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.48), skin);
+    scalp.position.set(0, 0.155, 0.01);
+    const fringe = new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.026, 8, 16), hair);
+    fringe.rotation.x = Math.PI / 2.2;
+    fringe.position.set(0, 0.09, 0.015);
+    const nape = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8, 0.2, 2.6, 1.15, 0.85), hair);
+    nape.position.set(0, 0.05, -0.03);
+    this.headBone?.add(scalp, fringe, nape);
+  }
+
+  private fadeClip(name: 'idle' | 'walk' | 'wave' | 'look_around'): void {
+    if (!this.mixer || this.currentClip === name || !this.actions[name]) return;
+    const next = this.actions[name]!;
+    const prev = this.actions[this.currentClip];
+    next.reset().fadeIn(0.28).play();
+    prev?.fadeOut(0.28);
+    this.currentClip = name;
   }
 
   public showWisp(text: string, duration = 4.6): void {
@@ -262,6 +381,11 @@ export class SaintAgent {
   ): void {
     this.gesturePhase += dt * 2.4;
     this.greetCooldown = Math.max(0, this.greetCooldown - dt);
+    this.mixer?.update(dt);
+    if (this.crownUniform && this.headBone) {
+      this.headBone.getWorldPosition(this.crownUniform.value);
+      this.crownUniform.value.y += 0.12 * (this.profile.bodyScale ?? 1);
+    }
 
     if (this.wispTimer > 0) {
       this.wispTimer -= dt;
@@ -399,6 +523,14 @@ export class SaintAgent {
     // Subtle pulsing ground fellowship ring when player is near
     const haloMat = this.haloRing.material as THREE.MeshBasicMaterial;
     haloMat.opacity = distToPlayer < 6 ? 0.55 + Math.sin(elapsed * 3) * 0.15 : 0.34;
+
+    if (this.mixer) {
+      const moving = walkSpeed > 0.1;
+      if (moving) this.fadeClip('walk');
+      else if (effectiveState === 'greet') this.fadeClip('wave');
+      else if (effectiveState === 'pair-talk' || effectiveState === 'converse-player') this.fadeClip('look_around');
+      else this.fadeClip('idle');
+    }
   }
 
   private smoothRotateY(targetYaw: number, alpha: number): void {
