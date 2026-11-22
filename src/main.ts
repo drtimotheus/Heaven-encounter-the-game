@@ -429,10 +429,10 @@ const TELEPORTS: Record<string, { x: number; z: number; yaw: number }> = {
   pool: { x: 10.5, z: -6.0, yaw: -0.75 },
   mist: { x: 17.5, z: 4.5, yaw: -1.4 },
   overlook: { x: 0, z: -23.5, yaw: 0 },
-  paul_peter: { x: 4.1, z: 5.5, yaw: 0.05 },
-  david: { x: -4.2, z: 10.8, yaw: 0.85 },
-  moses_elijah: { x: 11.4, z: 9.8, yaw: -0.05 },
-  john_isaiah: { x: 0.1, z: -12.6, yaw: 0.0 }
+  paul_peter: { x: 4.1, z: 4.4, yaw: 0.05 },
+  david: { x: -5.4, z: 9.6, yaw: 0.85 },
+  moses_elijah: { x: 11.4, z: 8.6, yaw: -0.05 },
+  john_isaiah: { x: 0.1, z: -13.6, yaw: 0.0 }
 };
 
 document.querySelectorAll<HTMLButtonElement>('.place-btn').forEach((btn) => {
