@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { AMBIENT_BANTER_PAIRS, SAINTS } from '../data/dialogues';
 import { SaintAgent } from './SaintAgent';
-import type { GraphicsQuality, WorldGraphics } from './graphics';
+import { ProceduralTextureLibrary } from './ProceduralTextures';
 
 export interface InteractablePoint {
   id: string;
@@ -29,346 +29,56 @@ interface PrismaticBird {
 export class TerraceWorld {
   public readonly group = new THREE.Group();
   public readonly interactables: InteractablePoint[] = [];
+  public readonly saintAgents: Map<string, SaintAgent> = new Map();
 
+  private readonly tex = new ProceduralTextureLibrary();
+  private skyMaterial!: THREE.ShaderMaterial;
   private grassMaterial!: THREE.ShaderMaterial;
-  private grassMesh!: THREE.InstancedMesh;
-  private waterMaterial!: THREE.Material;
-  private waterMesh!: THREE.Mesh;
-  private seaMesh!: THREE.Mesh;
-  private riverNormal: THREE.Texture | null = null;
-  private terrainMat!: THREE.MeshStandardMaterial;
-  private stoneMat!: THREE.MeshStandardMaterial;
-  private marbleMat!: THREE.MeshStandardMaterial;
-  private woodMat!: THREE.MeshStandardMaterial;
-  private barkMat!: THREE.MeshStandardMaterial;
-  private wallMat!: THREE.MeshStandardMaterial;
-  private readonly trees: { group: THREE.Group; scale: number; healing: boolean }[] = [];
-  private gateGroup!: THREE.Group;
-  private flowerMesh!: THREE.InstancedMesh;
-  private readonly plainColumns: THREE.Mesh[] = [];
+  private waterMaterial!: THREE.ShaderMaterial;
+  private waterfallMat!: THREE.ShaderMaterial;
   private poolMaterial!: THREE.ShaderMaterial;
   private pearlMaterial!: THREE.ShaderMaterial;
   private birds: PrismaticBird[] = [];
   private fallingLeaves!: THREE.Points;
+  private goldenMotes!: THREE.Points;
+  private waterfallMist!: THREE.Points;
   private leafBurstParticles!: THREE.Points;
   private leafBurstTime = -1;
   private mistClouds: THREE.Mesh[] = [];
-  public readonly saintAgents: Map<string, SaintAgent> = new Map();
   private banterStates: Map<string, { lineIdx: number; timer: number }> = new Map();
   private sunLight!: THREE.DirectionalLight;
 
   constructor() {
     this.buildSkyAndLighting();
+    this.buildDistantMountains();
     this.buildTerrainAndRiver();
+    this.buildRiverbankBouldersAndWaterfall();
     this.buildLivingGrass();
     this.buildWildflowers();
     this.buildBridgeAndWalkways();
-    this.buildWalledOrchard();
+    this.buildWalledOrchardAndBotanicalTrees();
     this.buildMemoryPavilion();
     this.buildGrayMistFork();
     this.buildDistantCityAndPearlGate();
+    this.buildVolumetricGodRaysAndMotes();
     this.buildPrismaticBirds();
     this.buildSaintsAndBenches();
     this.buildHealingLeafBurst();
   }
 
-  public setShadowQuality(quality: GraphicsQuality): void {
-    const size = quality === 'high' ? 2048 : quality === 'medium' ? 1024 : 512;
-    this.sunLight.shadow.mapSize.set(size, size);
-    this.sunLight.shadow.radius = quality === 'low' ? 1 : 3.2;
-    if (this.sunLight.shadow.map) {
-      this.sunLight.shadow.map.dispose();
-      this.sunLight.shadow.map = null;
-    }
-  }
-
-  /** Swap flat colors for CC0 PBR maps, physical water, and leaf-card canopies. */
-  public applyPbr(gfx: WorldGraphics): void {
-    const normals = gfx.quality !== 'low';
-    const paint = (
-      mat: THREE.MeshStandardMaterial,
-      map: THREE.Texture,
-      normal?: THREE.Texture,
-      rough?: THREE.Texture
-    ) => {
-      mat.map = map;
-      mat.normalMap = normals && normal ? normal : null;
-      mat.roughnessMap = rough ?? null;
-      mat.color.set(0xffffff);
-      mat.needsUpdate = true;
-    };
-
-    paint(this.terrainMat, gfx.grass.map, gfx.grass.normal, gfx.grass.rough);
-    this.terrainMat.color.set(0xe4f6c2);
-    this.terrainMat.normalScale.set(0.65, 0.65);
-    this.terrainMat.onBeforeCompile = (shader) => {
-      shader.uniforms.uSand = { value: gfx.sand.map };
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nuniform sampler2D uSand;')
-        .replace(
-          '#include <map_fragment>',
-          `#include <map_fragment>
-           vec3 sandCol = texture2D(uSand, vMapUv * 0.5).rgb;
-           float sandMix = smoothstep(0.48, 0.2, vColor.g);
-           diffuseColor.rgb = mix(diffuseColor.rgb, sandCol, sandMix);
-           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.84, 0.4), 0.22 * (1.0 - sandMix));`
-        );
-    };
-    this.group.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh || mesh.material !== this.terrainMat) return;
-      const attr = mesh.geometry.getAttribute('color') as THREE.BufferAttribute;
-      for (let i = 0; i < attr.count; i++) {
-        attr.setXYZ(
-          i,
-          THREE.MathUtils.lerp(attr.getX(i), 1, 0.58),
-          THREE.MathUtils.lerp(attr.getY(i), 1, 0.5),
-          THREE.MathUtils.lerp(attr.getZ(i), 1, 0.68)
-        );
-      }
-      attr.needsUpdate = true;
-    });
-
-    paint(this.stoneMat, gfx.marble.map, gfx.marble.normal, gfx.marble.rough);
-    paint(this.wallMat, gfx.marble.map, gfx.marble.normal, gfx.marble.rough);
-    paint(this.marbleMat, gfx.marble.map, gfx.marble.normal, gfx.marble.rough);
-    paint(this.barkMat, gfx.bark.map, gfx.bark.normal);
-    paint(this.woodMat, gfx.wood.map, gfx.wood.normal);
-    this.wallMat.color.set(0xfff4e6);
-    this.marbleMat.color.set(0xfff8ef);
-
-    const seaNormal = gfx.waterNormal.clone();
-    seaNormal.repeat.set(8, 8);
-    this.riverNormal = gfx.waterNormal;
-    const riverMat = new THREE.MeshPhysicalMaterial({
-      color: 0x7ecfc4,
-      roughness: 0.14,
-      metalness: 0.04,
-      transmission: 0.22,
-      thickness: 0.55,
-      ior: 1.33,
-      transparent: true,
-      opacity: 0.9,
-      attenuationColor: new THREE.Color(0x1f8f86),
-      attenuationDistance: 1.4,
-      envMapIntensity: 1.15,
-      normalMap: gfx.waterNormal,
-      normalScale: new THREE.Vector2(0.45, 0.45)
-    });
-    this.waterMesh.material = riverMat;
-    this.waterMaterial = riverMat;
-
-    this.seaMesh.material = new THREE.MeshPhysicalMaterial({
-      color: 0x9fd0f4,
-      roughness: 0.03,
-      metalness: 0.08,
-      transmission: 0.28,
-      thickness: 0.45,
-      ior: 1.33,
-      transparent: true,
-      opacity: 0.92,
-      envMapIntensity: 1.5,
-      normalMap: seaNormal,
-      normalScale: new THREE.Vector2(0.05, 0.05)
-    });
-
-    const leafMat = new THREE.MeshStandardMaterial({
-      map: gfx.leaf,
-      transparent: true,
-      alphaTest: 0.38,
-      roughness: 0.58,
-      side: THREE.DoubleSide,
-      color: 0xf3ffe6
-    });
-    const healingLeaf = leafMat.clone();
-    healingLeaf.emissive = new THREE.Color(0x7cb85a);
-    healingLeaf.emissiveIntensity = 0.16;
-    const card = new THREE.PlaneGeometry(1, 1);
-    for (const tree of this.trees) {
-      const remove: THREE.Object3D[] = [];
-      tree.group.traverse((obj) => {
-        if (obj.userData.kind === 'crown') remove.push(obj);
-      });
-      remove.forEach((obj) => obj.parent?.remove(obj));
-      const mat = tree.healing ? healingLeaf : leafMat;
-      const spots: [number, number, number][] = [
-        [0, 3.45, 0],
-        [0.85, 3.1, 0.4],
-        [-0.8, 3.2, -0.35],
-        [0.1, 4.2, -0.2]
-      ];
-      for (const [x, y, z] of spots) {
-        for (const yaw of [0, Math.PI / 3, (2 * Math.PI) / 3]) {
-          const leaf = new THREE.Mesh(card, mat);
-          leaf.scale.set(1.65 * tree.scale, 1.2 * tree.scale, 1);
-          leaf.position.set(x * tree.scale, y * tree.scale, z * tree.scale);
-          leaf.rotation.y = yaw;
-          leaf.castShadow = gfx.quality !== 'low';
-          tree.group.add(leaf);
-        }
-      }
-    }
-
-    this.grassMesh.count = 0;
-    if (this.flowerMesh) this.flowerMesh.count = 0;
-    this.dressHeaven(gfx);
-  }
-
-  private dressHeaven(gfx: WorldGraphics): void {
-    const count = gfx.quality === 'low' ? 18 : gfx.quality === 'medium' ? 36 : 56;
-    this.scatterProp(gfx.props.grass, count, 0.85);
-    this.scatterProp(gfx.props.flowers, Math.floor(count * 0.55), 1);
-    this.scatterProp(gfx.props.fern, gfx.quality === 'low' ? 4 : 8, 1.1);
-
-    const columnMat = new THREE.MeshStandardMaterial({
-      color: 0xfff8ef,
-      map: gfx.marble.map,
-      normalMap: gfx.quality === 'low' ? null : gfx.marble.normal,
-      roughnessMap: gfx.marble.rough,
-      roughness: 0.38,
-      metalness: 0.04
-    });
-    this.plainColumns.forEach((col) => {
-      col.visible = false;
-      const ionic = gfx.props.column.clone(true);
-      ionic.traverse((obj) => {
-        const mesh = obj as THREE.Mesh;
-        if (mesh.isMesh) mesh.material = columnMat;
-      });
-      ionic.scale.setScalar(0.82);
-      ionic.position.copy(col.position);
-      ionic.position.y -= 2.2;
-      col.parent?.add(ionic);
-    });
-
-    const jasper = new THREE.MeshStandardMaterial({
-      color: 0xd7f3e4,
-      map: gfx.marble.map,
-      normalMap: gfx.quality === 'low' ? null : gfx.marble.normal,
-      roughness: 0.38,
-      metalness: 0.08,
-      emissive: 0x8fb89a,
-      emissiveIntensity: 0.12
-    });
-    const gold = new THREE.MeshStandardMaterial({
-      color: 0xf2c96b,
-      roughness: 0.28,
-      metalness: 0.72,
-      emissive: 0x6a4a10,
-      emissiveIntensity: 0.2
-    });
-    this.gateGroup.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (mesh.isMesh && mesh.userData.kind === 'jasper-wall') mesh.material = jasper;
-    });
-    [-8.2, 8.2].forEach((x) => {
-      const ionic = gfx.props.column.clone(true);
-      ionic.scale.setScalar(2.15);
-      ionic.position.set(x, -1.6, 0);
-      ionic.traverse((obj) => {
-        const mesh = obj as THREE.Mesh;
-        if (mesh.isMesh) {
-          mesh.material = columnMat;
-          mesh.castShadow = gfx.quality !== 'low';
-        }
-      });
-      this.gateGroup.add(ionic);
-    });
-    const goldRim = new THREE.Mesh(new THREE.TorusGeometry(8.2, 0.18, 12, 48, Math.PI), gold);
-    goldRim.position.y = 3.6;
-    this.gateGroup.add(goldRim);
-    const innerPearl = new THREE.Mesh(new THREE.TorusGeometry(7.2, 0.55, 20, 48, Math.PI), this.pearlMaterial);
-    innerPearl.position.y = 3.3;
-    this.gateGroup.add(innerPearl);
-    [-16, 16].forEach((x) => {
-      const course = new THREE.Mesh(new THREE.BoxGeometry(16, 0.28, 2.8), gold);
-      course.position.set(x, 9.4, 0);
-      this.gateGroup.add(course);
-      const base = new THREE.Mesh(new THREE.BoxGeometry(16, 0.22, 2.8), gold);
-      base.position.set(x, 0.7, 0);
-      this.gateGroup.add(base);
-      for (let i = 0; i < 10; i++) {
-        const dentil = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.28), gold);
-        dentil.position.set(x - 7 + i * 1.45, 9.05, 1.35);
-        this.gateGroup.add(dentil);
-      }
-    });
-
-    if (gfx.quality !== 'low') {
-      const shaftMat = new THREE.MeshBasicMaterial({
-        color: 0xfff1c4,
-        transparent: true,
-        opacity: 0.07,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-        side: THREE.DoubleSide
-      });
-      const spots: [number, number][] = [[-6, 4], [8, -2], [-14, -8], [3, 10], [12, 6]];
-      spots.forEach(([x, z], i) => {
-        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 1.8, 14, 8, 1, true), shaftMat);
-        shaft.position.set(x, this.getGroundHeight(x, z) + 7, z);
-        shaft.rotation.z = 0.35;
-        shaft.rotation.y = i;
-        this.group.add(shaft);
-      });
-    }
-  }
-
-  private scatterProp(template: THREE.Object3D, count: number, scale: number): void {
-    const parts: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
-    template.updateMatrixWorld(true);
-    template.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh) return;
-      const geometry = mesh.geometry.clone();
-      geometry.applyMatrix4(mesh.matrixWorld);
-      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-      parts.push({ geometry, material });
-    });
-    for (const part of parts) {
-      const inst = new THREE.InstancedMesh(part.geometry, part.material, count);
-      inst.castShadow = true;
-      inst.receiveShadow = true;
-      const dummy = new THREE.Object3D();
-      let placed = 0;
-      for (let n = 0; n < count * 6 && placed < count; n++) {
-        const x = (Math.random() - 0.5) * 48;
-        const z = (Math.random() - 0.5) * 46 - 2;
-        if (Math.abs(x - this.getRiverCenterX(z)) < 4.2) continue;
-        if (Math.hypot(x - 14, z + 10) < 5.5) continue;
-        if (x > 20) continue;
-        dummy.position.set(x, this.getGroundHeight(x, z), z);
-        dummy.rotation.y = Math.random() * Math.PI * 2;
-        const s = scale * (0.75 + Math.random() * 0.7);
-        dummy.scale.setScalar(s);
-        dummy.updateMatrix();
-        inst.setMatrixAt(placed++, dummy.matrix);
-      }
-      inst.count = placed;
-      inst.instanceMatrix.needsUpdate = true;
-      this.group.add(inst);
-    }
-  }
-
   public getGroundHeight(x: number, z: number): number {
-    // Gentle rolling Mediterranean hillside rising gently toward the north (negative Z = Rising Road)
     const gentleHills =
       Math.sin(x * 0.065) * 0.55 +
       Math.cos(z * 0.06) * 0.45 +
       Math.sin((x + z) * 0.04) * 0.35;
 
-    // River channel runs along x ≈ -4 + sin(z * 0.08) * 3.5
     const riverCenter = this.getRiverCenterX(z);
     const distRiver = Math.abs(x - riverCenter);
     const riverDip = distRiver < 4.5 ? -Math.cos((distRiver / 4.5) * (Math.PI / 2)) * 1.15 : 0;
 
-    // Gentle upward slope along the Rising Road (z < -18)
     const risingSlope = z < -18 ? Math.min(4.2, (-18 - z) * 0.16) : 0;
-
-    // Gentle dip down toward Gray Mist canyon on far east (x > 21)
     const mistDip = x > 21 ? -Math.min(5.5, (x - 21) * 0.42) : 0;
 
-    // Flatten the Arrival Meadow, Pavilion, and Orchard slightly for clean architecture
     const pavDist = Math.hypot(x - 14, z + 10);
     const flattenPav = pavDist < 6 ? Math.max(0, 1 - pavDist / 6) : 0;
     const rawH = gentleHills + riverDip + risingSlope + mistDip;
@@ -380,16 +90,17 @@ export class TerraceWorld {
   }
 
   private buildSkyAndLighting(): void {
-    // Warm banked-glory sky dome shader
-    const skyGeo = new THREE.SphereGeometry(240, 32, 24);
-    const skyMat = new THREE.ShaderMaterial({
+    // Painterly-photorealistic sky dome with drifting volumetric cumulus clouds & Mie golden sun scattering
+    const skyGeo = new THREE.SphereGeometry(280, 48, 32);
+    this.skyMaterial = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        topColor: { value: new THREE.Color(0x5288c4) },
-        midColor: { value: new THREE.Color(0xf6d8a8) },
-        horizonColor: { value: new THREE.Color(0xfff1cf) },
-        sunDir: { value: new THREE.Vector3(0.72, 0.48, -0.42).normalize() }
+        uTime: { value: 0 },
+        topColor: { value: new THREE.Color(0x3a6fb3) },
+        midColor: { value: new THREE.Color(0x9fc2dd) },
+        horizonColor: { value: new THREE.Color(0xffe9c2) },
+        sunDir: { value: new THREE.Vector3(0.05, 0.24, -0.97).normalize() }
       },
       vertexShader: `
         varying vec3 vWorldPos;
@@ -400,61 +111,145 @@ export class TerraceWorld {
         }
       `,
       fragmentShader: `
+        uniform float uTime;
         uniform vec3 topColor;
         uniform vec3 midColor;
         uniform vec3 horizonColor;
         uniform vec3 sunDir;
         varying vec3 vWorldPos;
+
+        float hash(vec2 p) {
+          return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
+        float noise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(
+            mix(hash(i + vec2(0.0, 0.0)), hash(i + vec2(1.0, 0.0)), u.x),
+            mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x),
+            u.y
+          );
+        }
+        float fbm(vec2 p) {
+          float v = 0.0;
+          float a = 0.5;
+          for (int i = 0; i < 5; i++) {
+            v += a * noise(p);
+            p *= 2.04;
+            a *= 0.5;
+          }
+          return v;
+        }
+
         void main() {
           vec3 dir = normalize(vWorldPos);
           float h = clamp(dir.y, 0.0, 1.0);
-          vec3 col = mix(horizonColor, midColor, smoothstep(0.0, 0.28, h));
-          col = mix(col, topColor, smoothstep(0.22, 0.82, h));
+
+          vec3 col = mix(horizonColor, midColor, smoothstep(0.0, 0.32, h));
+          col = mix(col, topColor, smoothstep(0.24, 0.85, h));
+
+          // Mie golden solar glow
           float sunAmt = max(dot(dir, sunDir), 0.0);
-          col += vec3(1.0, 0.93, 0.72) * pow(sunAmt, 8.0) * 0.22;
-          col += vec3(1.0, 0.97, 0.88) * pow(sunAmt, 64.0) * 0.28;
+          col += vec3(1.0, 0.88, 0.64) * pow(sunAmt, 7.0) * 0.45;
+          col += vec3(1.0, 0.96, 0.86) * pow(sunAmt, 64.0) * 0.95;
+
+          // Sun-kissed cumulus clouds projected across upper sky dome
+          if (dir.y > 0.04) {
+            vec2 cloudUv = dir.xz / (dir.y + 0.22) * 1.45 + vec2(uTime * 0.008, -uTime * 0.005);
+            float c = fbm(cloudUv);
+            float density = smoothstep(0.46, 0.78, c) * smoothstep(0.04, 0.22, dir.y) * smoothstep(0.95, 0.4, dir.y);
+            vec3 cloudShade = mix(vec3(0.84, 0.86, 0.92), vec3(1.0, 0.96, 0.88), smoothstep(0.45, 0.8, c));
+            vec3 sunRim = vec3(1.0, 0.91, 0.74) * pow(sunAmt, 4.0) * 0.45;
+            col = mix(col, cloudShade + sunRim, density * 0.78);
+          }
+
           gl_FragColor = vec4(col, 1.0);
         }
       `
     });
-    this.group.add(new THREE.Mesh(skyGeo, skyMat));
+    this.group.add(new THREE.Mesh(skyGeo, this.skyMaterial));
 
-    const hemi = new THREE.HemisphereLight(0xfff6dc, 0x6ea06e, 1.15);
+    const hemi = new THREE.HemisphereLight(0xfff5db, 0x4f7848, 0.95);
     this.group.add(hemi);
 
-    this.sunLight = new THREE.DirectionalLight(0xfff1d2, 2.35);
-    this.sunLight.position.set(34, 36, -16);
+    this.sunLight = new THREE.DirectionalLight(0xffe4b3, 2.25);
+    this.sunLight.position.set(10, 26, -46);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(2048, 2048);
-    this.sunLight.shadow.radius = 2.5;
-    this.sunLight.shadow.normalBias = 0.035;
-    this.sunLight.shadow.camera.near = 5;
-    this.sunLight.shadow.camera.far = 120;
-    this.sunLight.shadow.camera.left = -45;
-    this.sunLight.shadow.camera.right = 45;
-    this.sunLight.shadow.camera.top = 45;
-    this.sunLight.shadow.camera.bottom = -45;
-    this.sunLight.shadow.bias = -0.0005;
+    this.sunLight.shadow.camera.near = 4;
+    this.sunLight.shadow.camera.far = 135;
+    this.sunLight.shadow.camera.left = -46;
+    this.sunLight.shadow.camera.right = 46;
+    this.sunLight.shadow.camera.top = 46;
+    this.sunLight.shadow.camera.bottom = -46;
+    this.sunLight.shadow.bias = -0.0004;
+    this.sunLight.shadow.normalBias = 0.03;
     this.group.add(this.sunLight);
 
-    // Subtle warm bounce from below to emulate Heaven's inner light
-    const bounce = new THREE.DirectionalLight(0xffe1a8, 0.42);
-    bounce.position.set(-10, -10, 15);
-    this.group.add(bounce);
+    // Warm sunlit bounce fill so shadows stay soft and luminous
+    const fill = new THREE.DirectionalLight(0xd4e6ff, 0.45);
+    fill.position.set(-22, 14, 24);
+    this.group.add(fill);
+  }
+
+  private buildDistantMountains(): void {
+    // Multi-tiered Mediterranean alpine ridges ringing the 360-degree horizon (C007_I03 / C016_I02)
+    const layers = [
+      { radius: 96, height: 26, color: 0x7a9688, opacity: 0.92, seed: 1.3 },
+      { radius: 145, height: 42, color: 0x9cb1c4, opacity: 0.78, seed: 4.7 },
+      { radius: 200, height: 64, color: 0xc9d3df, opacity: 0.52, seed: 9.1 }
+    ];
+
+    layers.forEach((layer) => {
+      const segs = 96;
+      const geo = new THREE.CylinderGeometry(layer.radius, layer.radius + 14, layer.height, segs, 6, true);
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        if (y > -layer.height * 0.4) {
+          const x = pos.getX(i);
+          const z = pos.getZ(i);
+          const a = Math.atan2(z, x);
+          // Dip slightly north (around -PI/2) to frame the Eastern Gate & Most Holy Place cleanly!
+          const gateNotch = 1.0 - Math.exp(-Math.pow(Math.sin((a + Math.PI / 2) * 0.5), 2) * 18) * 0.65;
+          const ridge =
+            (Math.sin(a * 5 + layer.seed) * 0.45 +
+              Math.cos(a * 11 - layer.seed * 2) * 0.3 +
+              Math.sin(a * 23 + layer.seed) * 0.15 +
+              0.65) *
+            gateNotch;
+          const t = (y + layer.height * 0.5) / layer.height;
+          pos.setY(i, -4 + t * layer.height * ridge);
+        }
+      }
+      geo.computeVertexNormals();
+      const mat = new THREE.MeshStandardMaterial({
+        color: layer.color,
+        roughness: 0.95,
+        metalness: 0.0,
+        transparent: true,
+        opacity: layer.opacity,
+        side: THREE.BackSide
+      });
+      const ring = new THREE.Mesh(geo, mat);
+      this.group.add(ring);
+    });
   }
 
   private buildTerrainAndRiver(): void {
-    const size = 120;
-    const segs = 120;
+    const size = 128;
+    const segs = 140;
     const geo = new THREE.PlaneGeometry(size, size, segs, segs);
     geo.rotateX(-Math.PI / 2);
 
     const pos = geo.attributes.position;
     const colors: number[] = [];
-    const cMeadow = new THREE.Color(0x5fa853);
-    const cSunlit = new THREE.Color(0x7cc45e);
-    const cSand = new THREE.Color(0xdfd2b0);
-    const cMistStone = new THREE.Color(0x7c8287);
+    const cMeadow = new THREE.Color(0x4c8c42);
+    const cSunlit = new THREE.Color(0x73b352);
+    const cMossBank = new THREE.Color(0x3f753e);
+    const cPebble = new THREE.Color(0xcabca0);
+    const cMistStone = new THREE.Color(0x6e757d);
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -463,12 +258,15 @@ export class TerraceWorld {
       pos.setY(i, y);
 
       const riverDist = Math.abs(x - this.getRiverCenterX(z));
-      const c = cMeadow.clone().lerp(cSunlit, (Math.sin(x * 0.12) * 0.5 + 0.5) * 0.65);
-      if (riverDist < 4.2) {
-        c.lerp(cSand, 1 - riverDist / 4.2);
+      const patch = Math.sin(x * 0.13) * Math.cos(z * 0.11) * 0.5 + 0.5;
+      const c = cMeadow.clone().lerp(cSunlit, patch * 0.72);
+      if (riverDist < 5.2 && riverDist >= 3.2) {
+        c.lerp(cMossBank, 0.45);
+      } else if (riverDist < 3.2) {
+        c.lerp(cPebble, 1 - riverDist / 3.2);
       }
       if (x > 19.5) {
-        c.lerp(cMistStone, Math.min(1, (x - 19.5) / 10));
+        c.lerp(cMistStone, Math.min(1, (x - 19.5) / 9));
       }
       colors.push(c.r, c.g, c.b);
     }
@@ -476,18 +274,21 @@ export class TerraceWorld {
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geo.computeVertexNormals();
 
-    this.terrainMat = new THREE.MeshStandardMaterial({
+    const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.9,
-      metalness: 0.0,
-      color: 0xe7f3c4
+      map: this.tex.terrain.map,
+      normalMap: this.tex.terrain.normalMap,
+      normalScale: new THREE.Vector2(0.85, 0.85),
+      roughnessMap: this.tex.terrain.roughnessMap,
+      roughness: 0.92,
+      metalness: 0.02
     });
-    const terrain = new THREE.Mesh(geo, this.terrainMat);
+    const terrain = new THREE.Mesh(geo, mat);
     terrain.receiveShadow = true;
     this.group.add(terrain);
 
-    // Crystal River of Life flowing through the Terrace
-    const waterGeo = new THREE.PlaneGeometry(18, 118, 24, 96);
+    // Photorealistic Fresnel + Normal-Mapped Reflective River of Life
+    const waterGeo = new THREE.PlaneGeometry(18, 122, 32, 120);
     waterGeo.rotateX(-Math.PI / 2);
     const wPos = waterGeo.attributes.position;
     for (let i = 0; i < wPos.count; i++) {
@@ -501,53 +302,173 @@ export class TerraceWorld {
       transparent: true,
       uniforms: {
         uTime: { value: 0 },
-        uDeepColor: { value: new THREE.Color(0x2ca9b8) },
-        uGlowColor: { value: new THREE.Color(0xbef7f0) },
-        uGoldSpec: { value: new THREE.Color(0xfff1c4) }
+        uNormalMap: { value: this.tex.waterNormal },
+        uSunDir: { value: new THREE.Vector3(0.05, 0.28, -0.96).normalize() },
+        uDeepColor: { value: new THREE.Color(0x136f85) },
+        uShallowColor: { value: new THREE.Color(0x4fd1c5) },
+        uSkyReflect: { value: new THREE.Color(0xfff1cf) }
       },
       vertexShader: `
         uniform float uTime;
         varying vec2 vUv;
-        varying float vWave;
+        varying vec3 vWorldPos;
         void main() {
           vUv = uv;
           vec3 p = position;
-          float wave = sin(p.z * 0.7 - uTime * 2.2 + p.x * 0.6) * 0.045;
-          p.y += wave;
-          vWave = wave;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+          p.y += sin(p.z * 0.8 - uTime * 2.4 + p.x * 0.7) * 0.035;
+          vec4 wp = modelMatrix * vec4(p, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
         }
       `,
       fragmentShader: `
         uniform float uTime;
+        uniform sampler2D uNormalMap;
+        uniform vec3 uSunDir;
         uniform vec3 uDeepColor;
-        uniform vec3 uGlowColor;
-        uniform vec3 uGoldSpec;
+        uniform vec3 uShallowColor;
+        uniform vec3 uSkyReflect;
         varying vec2 vUv;
-        varying float vWave;
+        varying vec3 vWorldPos;
+
         void main() {
-          float shimmer = sin(vUv.y * 55.0 - uTime * 3.0 + sin(vUv.x * 16.0)) * 0.5 + 0.5;
-          float sparkle = pow(shimmer, 6.0);
-          vec3 col = mix(uDeepColor, uGlowColor, shimmer * 0.48 + 0.18);
-          col += uGoldSpec * sparkle * 0.55;
-          float edgeFade = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x);
-          gl_FragColor = vec4(col, 0.82 * edgeFade);
+          vec2 uv1 = vUv * vec2(2.5, 16.0) + vec2(0.0, -uTime * 0.14);
+          vec2 uv2 = vUv * vec2(4.0, 22.0) + vec2(uTime * 0.04, -uTime * 0.22);
+          vec3 n1 = texture2D(uNormalMap, uv1).rgb * 2.0 - 1.0;
+          vec3 n2 = texture2D(uNormalMap, uv2).rgb * 2.0 - 1.0;
+          vec3 N = normalize(vec3((n1.x + n2.x) * 0.45, 1.0, (n1.y + n2.y) * 0.45));
+
+          vec3 V = normalize(cameraPosition - vWorldPos);
+          float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.2);
+
+          vec3 H = normalize(uSunDir + V);
+          float spec = pow(max(dot(N, H), 0.0), 96.0);
+
+          float bankDist = min(vUv.x, 1.0 - vUv.x);
+          float foam = smoothstep(0.18, 0.08, bankDist) * (0.45 + 0.55 * sin(vUv.y * 90.0 - uTime * 4.0));
+
+          vec3 waterCol = mix(uShallowColor, uDeepColor, smoothstep(0.08, 0.36, bankDist));
+          waterCol = mix(waterCol, uSkyReflect, clamp(fresnel * 0.85, 0.0, 0.82));
+          waterCol += vec3(1.0, 0.96, 0.82) * spec * 1.45;
+          waterCol = mix(waterCol, vec3(0.96, 0.99, 1.0), clamp(foam * 0.55, 0.0, 0.65));
+
+          float edgeAlpha = smoothstep(0.02, 0.14, bankDist);
+          gl_FragColor = vec4(waterCol, 0.88 * edgeAlpha);
         }
       `
     });
-    this.waterMesh = new THREE.Mesh(waterGeo, this.waterMaterial);
-    const river = this.waterMesh;
-    river.position.y = -0.32;
+    const river = new THREE.Mesh(waterGeo, this.waterMaterial);
+    river.position.y = -0.3;
     this.group.add(river);
   }
 
+  private buildRiverbankBouldersAndWaterfall(): void {
+    // Organic sculpted mossy limestone boulders lining the crystal River of Life (C007_I03.png)
+    const rockMat = new THREE.MeshStandardMaterial({
+      color: 0xbcb5a6,
+      map: this.tex.stone.map,
+      normalMap: this.tex.stone.normalMap,
+      normalScale: new THREE.Vector2(1.4, 1.4),
+      roughnessMap: this.tex.stone.roughnessMap,
+      roughness: 0.86
+    });
+
+    for (let i = 0; i < 42; i++) {
+      const z = -26 + i * 1.25 + (Math.sin(i * 4.3) * 0.5);
+      const side = i % 2 === 0 ? -1 : 1;
+      const rx = this.getRiverCenterX(z) + side * (3.1 + (i % 4) * 0.45);
+      // Keep the bridge crossing clear
+      if (Math.abs(z - 1.5) < 3.5) continue;
+
+      const geo = new THREE.IcosahedronGeometry(0.55 + (i % 5) * 0.22, 2);
+      const p = geo.attributes.position;
+      for (let v = 0; v < p.count; v++) {
+        const vx = p.getX(v);
+        const vy = p.getY(v);
+        const vz = p.getZ(v);
+        const n = 1.0 + Math.sin(vx * 3.1 + i) * 0.18 + Math.cos(vz * 2.7 - i) * 0.14;
+        p.setXYZ(v, vx * n * 1.25, vy * n * 0.72, vz * n);
+      }
+      geo.computeVertexNormals();
+      const rock = new THREE.Mesh(geo, rockMat);
+      const ry = this.getGroundHeight(rx, z);
+      rock.position.set(rx, ry + 0.15, z);
+      rock.rotation.y = i * 1.3;
+      rock.castShadow = true;
+      rock.receiveShadow = true;
+      this.group.add(rock);
+    }
+
+    // Distant Cascading Waterfall feeding the River of Life below the Eastern Gate
+    const wfX = this.getRiverCenterX(-40);
+    const wfGeo = new THREE.PlaneGeometry(7.5, 11.5, 10, 16);
+    this.waterfallMat = new THREE.ShaderMaterial({
+      transparent: true,
+      side: THREE.DoubleSide,
+      uniforms: { uTime: { value: 0 } },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        varying vec2 vUv;
+        void main() {
+          float stream = sin(vUv.x * 26.0 + sin(vUv.y * 8.0 + uTime * 3.5)) * 0.5 + 0.5;
+          float fall = sin(vUv.y * 18.0 + uTime * 6.5) * 0.5 + 0.5;
+          vec3 col = mix(vec3(0.58, 0.89, 0.96), vec3(0.98, 0.99, 1.0), stream * 0.65 + fall * 0.35);
+          float alpha = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x) * 0.85;
+          gl_FragColor = vec4(col, alpha);
+        }
+      `
+    });
+    const wf = new THREE.Mesh(wfGeo, this.waterfallMat);
+    wf.position.set(wfX, 4.2, -41);
+    this.group.add(wf);
+
+    // Rising Waterfall Mist Particles
+    const mistCount = 90;
+    const mistGeo = new THREE.BufferGeometry();
+    const mistPos = new Float32Array(mistCount * 3);
+    for (let i = 0; i < mistCount; i++) {
+      mistPos[i * 3] = wfX + (Math.random() - 0.5) * 9;
+      mistPos[i * 3 + 1] = Math.random() * 4.5;
+      mistPos[i * 3 + 2] = -40 + (Math.random() - 0.5) * 4;
+    }
+    mistGeo.setAttribute('position', new THREE.BufferAttribute(mistPos, 3));
+    this.waterfallMist = new THREE.Points(
+      mistGeo,
+      new THREE.PointsMaterial({
+        map: this.tex.softGlow,
+        color: 0xeef9ff,
+        size: 3.2,
+        transparent: true,
+        opacity: 0.42,
+        depthWrite: false
+      })
+    );
+    this.group.add(this.waterfallMist);
+  }
+
   private buildLivingGrass(): void {
-    // 3,600 living grass blades that bend gently under footsteps and spring back greener!
-    const count = 3600;
-    const bladeGeo = new THREE.ConeGeometry(0.065, 0.62, 3);
-    bladeGeo.translate(0, 0.31, 0);
+    const count = 4800;
+    const bladeGeo = new THREE.PlaneGeometry(0.11, 0.68, 1, 3);
+    bladeGeo.translate(0, 0.34, 0);
+    // Taper blade tip cleanly
+    const bp = bladeGeo.attributes.position;
+    for (let i = 0; i < bp.count; i++) {
+      const y = bp.getY(i);
+      const t = y / 0.68;
+      bp.setX(i, bp.getX(i) * (1 - t * 0.88));
+      bp.setZ(i, t * t * 0.12);
+    }
+    bladeGeo.computeVertexNormals();
 
     this.grassMaterial = new THREE.ShaderMaterial({
+      side: THREE.DoubleSide,
       uniforms: {
         uTime: { value: 0 },
         uPlayerPos: { value: new THREE.Vector3(0, 0, 14) }
@@ -557,59 +478,58 @@ export class TerraceWorld {
         uniform vec3 uPlayerPos;
         varying float vTip;
         varying float vGreeted;
+        varying float vVar;
         void main() {
-          vTip = clamp(position.y / 0.62, 0.0, 1.0);
+          vTip = clamp(position.y / 0.68, 0.0, 1.0);
           vec4 worldInst = instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+          vVar = fract(sin(dot(worldInst.xz, vec2(12.9898, 78.233))) * 43758.5453);
           vec3 p = position;
 
-          // Gentle living breeze
-          float sway = sin(uTime * 1.7 + worldInst.x * 0.45 + worldInst.z * 0.35) * 0.11 * vTip;
+          float sway = sin(uTime * 1.8 + worldInst.x * 0.42 + worldInst.z * 0.36) * 0.13 * vTip * vTip;
           p.x += sway;
 
-          // Living grass bends tenderly around footsteps and springs back brighter green
           vec2 toGrass = worldInst.xz - uPlayerPos.xz;
           float dist = length(toGrass);
-          float bend = smoothstep(1.85, 0.25, dist);
-          vGreeted = smoothstep(3.2, 0.6, dist);
+          float bend = smoothstep(1.9, 0.25, dist);
+          vGreeted = smoothstep(3.4, 0.6, dist);
           if (dist > 0.001) {
             vec2 pushDir = normalize(toGrass);
-            p.xz += pushDir * bend * 0.38 * vTip;
-            p.y -= bend * 0.14 * vTip;
+            p.xz += pushDir * bend * 0.42 * vTip;
+            p.y -= bend * 0.15 * vTip;
           }
 
-          vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(p, 1.0);
-          gl_Position = projectionMatrix * mvPosition;
+          gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(p, 1.0);
         }
       `,
       fragmentShader: `
         varying float vTip;
         varying float vGreeted;
+        varying float vVar;
         void main() {
-          vec3 baseCol = vec3(0.24, 0.56, 0.25);
-          vec3 tipCol = vec3(0.56, 0.88, 0.38);
-          vec3 greetedTip = vec3(0.72, 1.0, 0.52);
-          vec3 col = mix(baseCol, mix(tipCol, greetedTip, vGreeted * 0.7), vTip);
+          vec3 baseCol = vec3(0.18, 0.42, 0.18);
+          vec3 tipCol = mix(vec3(0.46, 0.78, 0.32), vec3(0.68, 0.88, 0.36), vVar);
+          vec3 greetedTip = vec3(0.76, 1.0, 0.52);
+          vec3 col = mix(baseCol, mix(tipCol, greetedTip, vGreeted * 0.72), vTip);
           gl_FragColor = vec4(col, 1.0);
         }
       `
     });
 
-    this.grassMesh = new THREE.InstancedMesh(bladeGeo, this.grassMaterial, count);
-    const mesh = this.grassMesh;
+    const mesh = new THREE.InstancedMesh(bladeGeo, this.grassMaterial, count);
     const dummy = new THREE.Object3D();
     let placed = 0;
 
     for (let attempt = 0; attempt < count * 3 && placed < count; attempt++) {
-      const x = (Math.random() - 0.5) * 56;
-      const z = (Math.random() - 0.5) * 56 - 4;
+      const x = (Math.random() - 0.5) * 60;
+      const z = (Math.random() - 0.5) * 60 - 4;
       const distRiver = Math.abs(x - this.getRiverCenterX(z));
       const distPav = Math.hypot(x - 14, z + 10);
-      if (distRiver < 3.7 || distPav < 5.2 || x > 21) continue;
+      if (distRiver < 3.6 || distPav < 5.3 || x > 21) continue;
 
       const y = this.getGroundHeight(x, z);
-      dummy.position.set(x, y - 0.03, z);
+      dummy.position.set(x, y - 0.04, z);
       dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
-      const s = 0.75 + Math.random() * 0.8;
+      const s = 0.72 + Math.random() * 0.85;
       dummy.scale.set(s, s, s);
       dummy.updateMatrix();
       mesh.setMatrixAt(placed++, dummy.matrix);
@@ -620,36 +540,35 @@ export class TerraceWorld {
   }
 
   private buildWildflowers(): void {
-    // Iridescent wildflowers inspired by C007_I03.png
-    const count = 420;
-    const geo = new THREE.DodecahedronGeometry(0.14, 0);
+    const count = 480;
+    const geo = new THREE.SphereGeometry(0.12, 8, 6);
+    geo.scale(1.1, 0.48, 1.1);
     const mat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      emissive: 0x332233,
-      emissiveIntensity: 0.45,
+      emissive: 0x3a2a38,
+      emissiveIntensity: 0.38,
       roughness: 0.35
     });
-    this.flowerMesh = new THREE.InstancedMesh(geo, mat, count);
-    const mesh = this.flowerMesh;
+    const mesh = new THREE.InstancedMesh(geo, mat, count);
     const dummy = new THREE.Object3D();
     const palette = [
-      new THREE.Color(0xffb8d9), // rose-opalescent
-      new THREE.Color(0x9ee6ff), // iridescent sky blue
-      new THREE.Color(0xfff199), // golden center
-      new THREE.Color(0xd5b3ff), // soft lavender
-      new THREE.Color(0xffffff)  // pure luminous white
+      new THREE.Color(0xffb8d9),
+      new THREE.Color(0x9ee6ff),
+      new THREE.Color(0xfff199),
+      new THREE.Color(0xd5b3ff),
+      new THREE.Color(0xffffff)
     ];
 
     let placed = 0;
     for (let i = 0; i < count * 2 && placed < count; i++) {
-      const x = (Math.random() - 0.5) * 50;
-      const z = (Math.random() - 0.5) * 50 - 3;
-      if (Math.abs(x - this.getRiverCenterX(z)) < 3.3 || Math.hypot(x - 14, z + 10) < 5.5 || x > 20) continue;
+      const x = (Math.random() - 0.5) * 52;
+      const z = (Math.random() - 0.5) * 52 - 3;
+      if (Math.abs(x - this.getRiverCenterX(z)) < 3.4 || Math.hypot(x - 14, z + 10) < 5.5 || x > 20) continue;
       const y = this.getGroundHeight(x, z);
-      dummy.position.set(x, y + 0.24, z);
-      dummy.rotation.set(Math.random(), Math.random(), Math.random());
-      const s = 0.6 + Math.random() * 0.85;
-      dummy.scale.set(s, s * 0.65, s);
+      dummy.position.set(x, y + 0.28, z);
+      dummy.rotation.set(0, Math.random() * Math.PI, 0);
+      const s = 0.65 + Math.random() * 0.8;
+      dummy.scale.set(s, s, s);
       dummy.updateMatrix();
       mesh.setMatrixAt(placed, dummy.matrix);
       mesh.setColorAt(placed, palette[placed % palette.length]);
@@ -662,44 +581,46 @@ export class TerraceWorld {
   }
 
   private buildBridgeAndWalkways(): void {
-    this.stoneMat = new THREE.MeshStandardMaterial({
-      color: 0xf1e5cc,
-      roughness: 0.62,
-      metalness: 0.02
+    const stoneMat = new THREE.MeshStandardMaterial({
+      color: 0xf4ead5,
+      map: this.tex.stone.map,
+      normalMap: this.tex.stone.normalMap,
+      normalScale: new THREE.Vector2(1.0, 1.0),
+      roughnessMap: this.tex.stone.roughnessMap,
+      roughness: 0.68,
+      metalness: 0.06
     });
-    const stoneMat = this.stoneMat;
     const goldTrimMat = new THREE.MeshStandardMaterial({
       color: 0xf2c96b,
       emissive: 0x5c3e08,
-      emissiveIntensity: 0.35,
-      roughness: 0.3,
-      metalness: 0.65
+      emissiveIntensity: 0.28,
+      roughness: 0.22,
+      metalness: 0.82
     });
 
-    // Arched stone bridge crossing the River of Life near z = 1.5
     const bridgeGroup = new THREE.Group();
     const bridgeZ = 1.5;
     const bridgeX = this.getRiverCenterX(bridgeZ);
-    const deckSegs = 9;
+    const deckSegs = 11;
     for (let i = 0; i < deckSegs; i++) {
       const t = i / (deckSegs - 1) - 0.5;
-      const archY = Math.cos(t * Math.PI) * 0.95 + 0.15;
-      const plank = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.28, 3.2), stoneMat);
-      plank.position.set(t * 8.6, archY, 0);
+      const archY = Math.cos(t * Math.PI) * 1.05 + 0.14;
+      const plank = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.32, 3.4), stoneMat);
+      plank.position.set(t * 8.8, archY, 0);
       plank.rotation.z = -Math.sin(t * Math.PI) * 0.28;
       plank.castShadow = true;
       plank.receiveShadow = true;
       bridgeGroup.add(plank);
 
       if (i % 2 === 0) {
-        [-1.48, 1.48].forEach((sideZ) => {
-          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 0.95, 8), stoneMat);
-          post.position.set(t * 8.6, archY + 0.52, sideZ);
+        [-1.55, 1.55].forEach((sideZ) => {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.12, 0.96, 12), stoneMat);
+          post.position.set(t * 8.8, archY + 0.52, sideZ);
           post.castShadow = true;
           bridgeGroup.add(post);
 
-          const cap = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 8), goldTrimMat);
-          cap.position.set(t * 8.6, archY + 1.02, sideZ);
+          const cap = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 12), goldTrimMat);
+          cap.position.set(t * 8.8, archY + 1.02, sideZ);
           bridgeGroup.add(cap);
         });
       }
@@ -707,7 +628,6 @@ export class TerraceWorld {
     bridgeGroup.position.set(bridgeX, 0, bridgeZ);
     this.group.add(bridgeGroup);
 
-    // Stepping stones along the Terrace paths
     const pathPoints: [number, number][] = [
       [0, 12], [-0.5, 9], [-1.2, 6.2], [1.5, 3.5], [4.5, 0.5], [7.5, -2.5], [10.2, -5.5],
       [-7.5, 0.5], [-10.5, -2.0], [-13.0, -4.5],
@@ -715,31 +635,35 @@ export class TerraceWorld {
     ];
     pathPoints.forEach(([px, pz]) => {
       const y = this.getGroundHeight(px, pz);
-      const stone = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 1.15, 0.14, 12), stoneMat);
+      const stone = new THREE.Mesh(new THREE.CylinderGeometry(1.08, 1.2, 0.16, 16), stoneMat);
       stone.position.set(px, y + 0.04, pz);
       stone.receiveShadow = true;
       this.group.add(stone);
     });
   }
 
-  private buildWalledOrchard(): void {
-    // Zone 3: Low, open sunlit curved stone walls around x = -14.5, z = -9
+  private buildWalledOrchardAndBotanicalTrees(): void {
     const cx = -14.5;
     const cz = -9.0;
     const radius = 8.2;
-    this.wallMat = new THREE.MeshStandardMaterial({ color: 0xede2ca, roughness: 0.72 });
-    const wallMat = this.wallMat;
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: 0xf1e7d2,
+      map: this.tex.stone.map,
+      normalMap: this.tex.stone.normalMap,
+      normalScale: new THREE.Vector2(1.1, 1.1),
+      roughnessMap: this.tex.stone.roughnessMap,
+      roughness: 0.76
+    });
 
     const wallSegments = 22;
     for (let i = 0; i < wallSegments; i++) {
       const angle = (i / wallSegments) * Math.PI * 2;
-      // Leave two wide welcoming openings (east toward river & south toward terrace)
       if ((angle > -0.35 && angle < 0.55) || (angle > 1.25 && angle < 1.95)) continue;
       const wx = cx + Math.cos(angle) * radius;
       const wz = cz + Math.sin(angle) * radius;
       const wy = this.getGroundHeight(wx, wz);
 
-      const block = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.25, 0.65), wallMat);
+      const block = new THREE.Mesh(new THREE.BoxGeometry(2.15, 1.25, 0.68), wallMat);
       block.position.set(wx, wy + 0.55, wz);
       block.rotation.y = -angle + Math.PI / 2;
       block.castShadow = true;
@@ -747,27 +671,32 @@ export class TerraceWorld {
       this.group.add(block);
     }
 
-    // Trees of Life inside the Walled Orchard + Mediterranean olive/cypress accents around the Terrace
+    // Organic Botanical Olive & Trees of Life (gnarled trunks + textured leaf-sprig cards)
     const orchardTrees: [number, number, number][] = [
-      [-14.8, -9.2, 1.35], // Central Tree of Life (interactive healing leaves!)
-      [-18.8, -6.5, 1.05],
-      [-18.5, -12.5, 1.1],
-      [-11.5, -11.8, 0.95],
-      // Surrounding Terrace olive & fruit trees
-      [6.5, 8.5, 1.1],
-      [-8.5, 9.5, 1.0],
-      [9.5, 1.5, 0.95],
-      [18.2, -3.5, 0.9],
-      [-10.5, -20.5, 1.2],
-      [10.2, -19.5, 1.15]
+      [-14.8, -9.2, 1.38],
+      [-18.8, -6.5, 1.08],
+      [-18.5, -12.5, 1.12],
+      [-11.5, -11.8, 0.98],
+      [6.5, 8.5, 1.12],
+      [-8.5, 9.5, 1.04],
+      [9.5, 1.5, 0.98],
+      [18.2, -3.5, 0.92],
+      [-10.5, -20.5, 1.22],
+      [10.2, -19.5, 1.16]
     ];
-
     orchardTrees.forEach(([tx, tz, scale], idx) => {
-      const isHealingTree = idx === 0;
-      this.createHeavenlyTree(tx, tz, scale, isHealingTree);
+      this.createBotanicalTree(tx, tz, scale, idx === 0);
     });
 
-    // Gentle drifting luminous healing leaves in the Walled Orchard
+    // Tall Mediterranean Cypress Spires framing the Terrace & River (C016_I01_Covenant.png)
+    const cypressSpots: [number, number, number][] = [
+      [-9.5, 14.5, 1.15], [14.5, 11.5, 1.25], [17.8, -14.5, 1.3],
+      [-18.5, 4.5, 1.1], [-15.2, -23.0, 1.35], [13.5, -24.5, 1.25],
+      [6.8, -28.0, 1.18], [-6.8, -28.5, 1.22]
+    ];
+    cypressSpots.forEach(([tx, tz, s]) => this.createCypressTree(tx, tz, s));
+
+    // Drifting luminous healing leaves in the Orchard
     const leafCount = 140;
     const leafGeo = new THREE.BufferGeometry();
     const leafPos = new Float32Array(leafCount * 3);
@@ -779,18 +708,20 @@ export class TerraceWorld {
       leafPos[i * 3 + 2] = cz + Math.sin(a) * r;
     }
     leafGeo.setAttribute('position', new THREE.BufferAttribute(leafPos, 3));
-    const leafMat = new THREE.PointsMaterial({
-      color: 0xd9ff9c,
-      size: 0.16,
-      transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-    this.fallingLeaves = new THREE.Points(leafGeo, leafMat);
+    this.fallingLeaves = new THREE.Points(
+      leafGeo,
+      new THREE.PointsMaterial({
+        map: this.tex.softGlow,
+        color: 0xd9ff9c,
+        size: 0.24,
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
     this.group.add(this.fallingLeaves);
 
-    // Interactive Healing Leaves Point at the central Tree of Life
     const treeY = this.getGroundHeight(-14.8, -9.2);
     this.interactables.push({
       id: 'healing-leaves',
@@ -803,96 +734,166 @@ export class TerraceWorld {
     });
   }
 
-  private createHeavenlyTree(x: number, z: number, scale: number, isHealingTree: boolean): void {
+  private createBotanicalTree(x: number, z: number, scale: number, isHealingTree: boolean): void {
     const g = new THREE.Group();
     const y = this.getGroundHeight(x, z);
 
-    if (!this.barkMat) this.barkMat = new THREE.MeshStandardMaterial({ color: 0x6f533b, roughness: 0.86 });
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.24 * scale, 0.42 * scale, 3.4 * scale, 10), this.barkMat);
-    trunk.userData.kind = 'trunk';
-    trunk.position.y = 1.65 * scale;
+    const barkMat = new THREE.MeshStandardMaterial({
+      color: 0xb39c86,
+      map: this.tex.bark.map,
+      normalMap: this.tex.bark.normalMap,
+      normalScale: new THREE.Vector2(1.4, 1.4),
+      roughnessMap: this.tex.bark.roughnessMap,
+      roughness: 0.92
+    });
+
+    // Sculpted gnarled tapering trunk
+    const trunkProfile = [
+      new THREE.Vector2(0.46 * scale, 0),
+      new THREE.Vector2(0.32 * scale, 0.8 * scale),
+      new THREE.Vector2(0.26 * scale, 2.0 * scale),
+      new THREE.Vector2(0.2 * scale, 3.1 * scale)
+    ];
+    const trunk = new THREE.Mesh(new THREE.LatheGeometry(trunkProfile, 12), barkMat);
     trunk.castShadow = true;
+    trunk.receiveShadow = true;
     g.add(trunk);
 
-    const foliageMat = new THREE.MeshStandardMaterial({
-      color: isHealingTree ? 0x76d668 : 0x5ca84f,
-      emissive: isHealingTree ? 0x3b6e24 : 0x1c3614,
-      emissiveIntensity: isHealingTree ? 0.55 : 0.25,
-      roughness: 0.65
+    // 4 Spreading Major Branches
+    const branchAngles = [0.2, 1.75, 3.3, 4.9];
+    branchAngles.forEach((ba, idx) => {
+      const bLen = (1.6 + (idx % 2) * 0.45) * scale;
+      const limb = new THREE.Mesh(new THREE.CylinderGeometry(0.08 * scale, 0.16 * scale, bLen, 8), barkMat);
+      limb.position.set(Math.cos(ba) * 0.65 * scale, 2.95 * scale, Math.sin(ba) * 0.65 * scale);
+      limb.rotation.z = -Math.cos(ba) * 0.65;
+      limb.rotation.x = Math.sin(ba) * 0.65;
+      limb.castShadow = true;
+      g.add(limb);
     });
 
-    const clusterOffsets: [number, number, number, number][] = [
-      [0, 3.7, 0, 1.85],
-      [1.1, 3.2, 0.6, 1.35],
-      [-1.05, 3.3, -0.5, 1.4],
-      [0.3, 4.4, -0.4, 1.25]
-    ];
-    clusterOffsets.forEach(([ox, oy, oz, rad]) => {
-      const crown = new THREE.Mesh(new THREE.IcosahedronGeometry(rad * scale, 1), foliageMat);
-      crown.userData.kind = 'crown';
-      crown.position.set(ox * scale, oy * scale, oz * scale);
-      crown.castShadow = true;
-      g.add(crown);
+    // Dense Botanical Alpha-Cutout Leaf Sprig Cards (replaces faceted blobs!)
+    const leafMat = new THREE.MeshStandardMaterial({
+      map: this.tex.leafCard,
+      alphaTest: 0.35,
+      side: THREE.DoubleSide,
+      color: isHealingTree ? 0xc8ff9e : 0xa5e084,
+      emissive: isHealingTree ? 0x3b6e24 : 0x1e3816,
+      emissiveIntensity: isHealingTree ? 0.48 : 0.22,
+      roughness: 0.68
     });
 
-    // Glowing golden fruits suspended in the canopy
+    const cardGeo = new THREE.PlaneGeometry(2.1 * scale, 2.1 * scale);
+    const clusterCount = 26;
+    for (let i = 0; i < clusterCount; i++) {
+      const a = (i / clusterCount) * Math.PI * 2 * 3.1;
+      const r = (0.35 + ((i * 7) % 10) * 0.19) * scale;
+      const cy = (3.1 + Math.sin(i * 1.9) * 0.95 + (r < 1.0 * scale ? 0.55 * scale : 0)) * scale;
+      const card = new THREE.Mesh(cardGeo, leafMat);
+      card.position.set(Math.cos(a) * r, cy, Math.sin(a) * r);
+      card.rotation.set(
+        (Math.sin(i * 2.3) - 0.5) * 0.9,
+        a + i * 0.7,
+        (Math.cos(i * 1.7) - 0.5) * 0.6
+      );
+      card.castShadow = true;
+      g.add(card);
+    }
+
+    // Glowing Golden Fruits nestled in the canopy
     const fruitMat = new THREE.MeshStandardMaterial({
-      color: 0xffcf5e,
-      emissive: 0xffae2b,
-      emissiveIntensity: 0.75,
-      roughness: 0.25
+      color: 0xffd263,
+      emissive: 0xffa824,
+      emissiveIntensity: 0.68,
+      roughness: 0.24
     });
     for (let i = 0; i < (isHealingTree ? 12 : 6); i++) {
       const a = (i / 12) * Math.PI * 2;
-      const r = (0.9 + (i % 3) * 0.45) * scale;
-      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.14 * scale, 8, 8), fruitMat);
-      fruit.position.set(Math.cos(a) * r, (2.6 + (i % 2) * 0.5) * scale, Math.sin(a) * r);
+      const r = (0.95 + (i % 3) * 0.48) * scale;
+      const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.12 * scale, 10, 10), fruitMat);
+      fruit.position.set(Math.cos(a) * r, (2.8 + (i % 2) * 0.55) * scale, Math.sin(a) * r);
       g.add(fruit);
     }
 
     if (isHealingTree) {
-      const treeGlow = new THREE.PointLight(0xdfffa6, 1.8, 12);
-      treeGlow.position.set(0, 3.2, 0);
+      const treeGlow = new THREE.PointLight(0xdfffa6, 2.0, 14);
+      treeGlow.position.set(0, 3.4, 0);
       g.add(treeGlow);
     }
 
     g.position.set(x, y, z);
     this.group.add(g);
-    this.trees.push({ group: g, scale, healing: isHealingTree });
+  }
+
+  private createCypressTree(x: number, z: number, scale: number): void {
+    const g = new THREE.Group();
+    const y = this.getGroundHeight(x, z);
+
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.1 * scale, 0.2 * scale, 2.0 * scale, 8),
+      new THREE.MeshStandardMaterial({ map: this.tex.bark.map, normalMap: this.tex.bark.normalMap, roughness: 0.9 })
+    );
+    trunk.position.y = 1.0 * scale;
+    g.add(trunk);
+
+    const cyMat = new THREE.MeshStandardMaterial({
+      map: this.tex.cypressCard,
+      alphaTest: 0.35,
+      side: THREE.DoubleSide,
+      color: 0x6ea665,
+      roughness: 0.78
+    });
+
+    for (let tier = 0; tier < 4; tier++) {
+      const w = (1.65 - tier * 0.32) * scale;
+      const h = (2.4 - tier * 0.2) * scale;
+      for (let r = 0; r < 3; r++) {
+        const card = new THREE.Mesh(new THREE.PlaneGeometry(w, h), cyMat);
+        card.position.y = (2.1 + tier * 1.45) * scale;
+        card.rotation.y = (r / 3) * Math.PI + tier * 0.5;
+        card.castShadow = true;
+        g.add(card);
+      }
+    }
+
+    g.position.set(x, y, z);
+    this.group.add(g);
   }
 
   private buildMemoryPavilion(): void {
-    // Zone 5: Golden Pool of Living Memory (inspired by C006_S10_5s.jpg)
     const px = 14.0;
     const pz = -10.0;
     const py = this.getGroundHeight(px, pz);
     const pav = new THREE.Group();
     pav.position.set(px, py, pz);
 
-    this.marbleMat = new THREE.MeshStandardMaterial({ color: 0xf7f1e6, roughness: 0.32, metalness: 0.04 });
-    const marbleMat = this.marbleMat;
+    const marbleMat = new THREE.MeshStandardMaterial({
+      color: 0xfaf3e8,
+      map: this.tex.stone.map,
+      normalMap: this.tex.stone.normalMap,
+      normalScale: new THREE.Vector2(0.55, 0.55),
+      roughnessMap: this.tex.stone.roughnessMap,
+      roughness: 0.28,
+      metalness: 0.1
+    });
     const goldMat = new THREE.MeshStandardMaterial({
       color: 0xf7cf6b,
       emissive: 0x704d0a,
-      emissiveIntensity: 0.45,
-      roughness: 0.25,
-      metalness: 0.7
+      emissiveIntensity: 0.38,
+      roughness: 0.2,
+      metalness: 0.86
     });
 
-    // Stepped circular marble dais
-    const dais = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.6, 0.35, 32), marbleMat);
-    dais.position.y = 0.18;
+    const dais = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.7, 0.38, 40), marbleMat);
+    dais.position.y = 0.19;
     dais.receiveShadow = true;
     pav.add(dais);
 
-    // Basin rim
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(2.85, 0.28, 14, 48), marbleMat);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(2.85, 0.28, 16, 48), marbleMat);
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 0.72;
     rim.castShadow = true;
     pav.add(rim);
 
-    // Glowing Golden Liquid-Light Pool shader!
     const poolGeo = new THREE.CircleGeometry(2.75, 48);
     poolGeo.rotateX(-Math.PI / 2);
     this.poolMaterial = new THREE.ShaderMaterial({
@@ -924,32 +925,32 @@ export class TerraceWorld {
     pool.position.y = 0.68;
     pav.add(pool);
 
-    // Central marble fountain spire inside the pool
-    const fBase = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.45, 1.5, 16), marbleMat);
+    const fBase = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.46, 1.55, 20), marbleMat);
     fBase.position.y = 1.25;
     pav.add(fBase);
-    const fBowl = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.25, 0.32, 20), goldMat);
-    fBowl.position.y = 1.95;
+    const fBowl = new THREE.Mesh(new THREE.CylinderGeometry(0.98, 0.25, 0.34, 24), goldMat);
+    fBowl.position.y = 1.98;
     pav.add(fBowl);
 
-    // 6 luminous arched columns around the pavilion
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
-      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 4.6, 12), marbleMat);
-      col.userData.kind = 'plain-column';
-      this.plainColumns.push(col);
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.26, 4.65, 16), marbleMat);
       col.position.set(Math.cos(a) * 4.5, 2.5, Math.sin(a) * 4.5);
       col.castShadow = true;
       pav.add(col);
+
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.24, 0.24, 16), goldMat);
+      cap.position.set(Math.cos(a) * 4.5, 4.78, Math.sin(a) * 4.5);
+      pav.add(cap);
     }
 
-    const crownRing = new THREE.Mesh(new THREE.TorusGeometry(4.5, 0.24, 12, 48), goldMat);
+    const crownRing = new THREE.Mesh(new THREE.TorusGeometry(4.5, 0.24, 14, 48), goldMat);
     crownRing.rotation.x = Math.PI / 2;
-    crownRing.position.y = 4.85;
+    crownRing.position.y = 4.9;
     pav.add(crownRing);
 
-    const poolLight = new THREE.PointLight(0xffdd88, 3.2, 18);
-    poolLight.position.set(0, 2.5, 0);
+    const poolLight = new THREE.PointLight(0xffdd88, 3.2, 20);
+    poolLight.position.set(0, 2.6, 0);
     pav.add(poolLight);
 
     this.group.add(pav);
@@ -966,7 +967,6 @@ export class TerraceWorld {
   }
 
   private buildGrayMistFork(): void {
-    // Zone 1 East Bluff: Unchained downward path into swirling Gray Mist (C007_I04.png)
     const mistMat = new THREE.MeshBasicMaterial({
       color: 0x8e959e,
       transparent: true,
@@ -986,10 +986,14 @@ export class TerraceWorld {
     const mz = 4.5;
     const my = this.getGroundHeight(mx, mz);
 
-    // Quiet carved cairn stone marking the overlook
     const cairn = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.45, 0.6, 1.1, 8),
-      new THREE.MeshStandardMaterial({ color: 0xb0b4ba, roughness: 0.9 })
+      new THREE.CylinderGeometry(0.45, 0.62, 1.15, 12),
+      new THREE.MeshStandardMaterial({
+        color: 0xb6bac0,
+        map: this.tex.stone.map,
+        normalMap: this.tex.stone.normalMap,
+        roughness: 0.9
+      })
     );
     cairn.position.set(mx, my + 0.55, mz);
     this.group.add(cairn);
@@ -1006,15 +1010,12 @@ export class TerraceWorld {
   }
 
   private buildDistantCityAndPearlGate(): void {
-    // Zone 7 Distant Skyline: Ascending golden steps, Single-Pearl Eastern Gate, Most Holy Place pillar, Sapphire horizon!
     const gateZ = -48;
     const gateY = 4.2;
 
     const gateGroup = new THREE.Group();
-    this.gateGroup = gateGroup;
     gateGroup.position.set(0, gateY, gateZ);
 
-    // Colossal translucent single-pearl arch (C016_I04_Pearl_Gate.png)
     this.pearlMaterial = new THREE.ShaderMaterial({
       uniforms: { uTime: { value: 0 } },
       vertexShader: `
@@ -1035,42 +1036,51 @@ export class TerraceWorld {
           vec3 N = normalize(vNormal);
           vec3 V = normalize(vViewPos);
           float fres = pow(1.0 - max(dot(N, V), 0.0), 2.2);
-          vec3 pearl = vec3(0.78, 0.76, 0.72);
+          vec3 pearl = vec3(0.98, 0.96, 0.93);
           vec3 nacre = vec3(
-            0.72 + 0.16 * sin(uTime * 0.7 + fres * 6.0),
-            0.70 + 0.14 * sin(uTime * 0.7 + fres * 6.0 + 2.1),
-            0.84 + 0.1 * sin(uTime * 0.5 + fres * 4.0)
+            0.95 + 0.08 * sin(uTime * 0.7 + fres * 5.0),
+            0.90 + 0.10 * sin(uTime * 0.7 + fres * 5.0 + 2.0),
+            1.0
           );
-          vec3 col = mix(pearl, nacre, fres) + vec3(1.0, 0.9, 0.65) * fres * 0.22;
+          vec3 col = mix(pearl, nacre, fres) + vec3(1.0, 0.92, 0.7) * fres * 0.35;
           gl_FragColor = vec4(col, 1.0);
         }
       `
     });
 
-    const pearlArch = new THREE.Mesh(new THREE.TorusGeometry(9.5, 1.35, 32, 64, Math.PI), this.pearlMaterial);
+    const pearlArch = new THREE.Mesh(new THREE.TorusGeometry(9.5, 2.5, 28, 56, Math.PI), this.pearlMaterial);
     pearlArch.position.y = 2.5;
     gateGroup.add(pearlArch);
 
-    // Flanking sunlit jasper walls
+    // Fluted jasper walls & distant radiant city spires (C016_I04 / C017_I04)
     const wallMat = new THREE.MeshStandardMaterial({
       color: 0xfff6e5,
+      map: this.tex.stone.map,
+      normalMap: this.tex.stone.normalMap,
       emissive: 0x6b532b,
-      emissiveIntensity: 0.35,
-      roughness: 0.2
+      emissiveIntensity: 0.3,
+      roughness: 0.24
     });
     [-19, 19].forEach((wx) => {
-      const w = new THREE.Mesh(new THREE.BoxGeometry(18, 9.2, 2.4), wallMat);
-      w.userData.kind = 'jasper-wall';
-      w.position.set(wx, 5, 0);
+      const w = new THREE.Mesh(new THREE.BoxGeometry(20, 9.5, 3.2), wallMat);
+      w.position.set(wx, 4.75, 0);
       gateGroup.add(w);
     });
 
-    // Radiant Most Holy Place light pillar rising far behind the gate (C017_I04_Most_Holy_Place.png)
-    const pillarGeo = new THREE.CylinderGeometry(2.6, 7.5, 110, 32, 1, true);
+    const spirePositions: [number, number, number][] = [
+      [-14, 18, -14], [-7, 25, -20], [0, 36, -26], [7, 24, -20], [14, 17, -15]
+    ];
+    spirePositions.forEach(([sx, sh, sz]) => {
+      const spire = new THREE.Mesh(new THREE.ConeGeometry(2.2, sh, 8), wallMat);
+      spire.position.set(sx, sh * 0.5 + 3, sz);
+      gateGroup.add(spire);
+    });
+
+    const pillarGeo = new THREE.CylinderGeometry(2.4, 7.2, 110, 32, 1, true);
     const pillarMat = new THREE.MeshBasicMaterial({
       color: 0xfff3c9,
       transparent: true,
-      opacity: 0.14,
+      opacity: 0.2,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false
@@ -1079,27 +1089,23 @@ export class TerraceWorld {
     pillar.position.set(0, 52, -32);
     gateGroup.add(pillar);
 
-    // Distant Golden Ring Halo Sanctuary (Sea of Glass motif)
     const halo = new THREE.Mesh(
-      new THREE.TorusGeometry(18, 0.65, 16, 64),
-      new THREE.MeshBasicMaterial({ color: 0xffe49e, transparent: true, opacity: 0.42 })
+      new THREE.TorusGeometry(18, 0.62, 16, 64),
+      new THREE.MeshBasicMaterial({ color: 0xffe49e, transparent: true, opacity: 0.65 })
     );
     halo.position.set(0, 22, -28);
     gateGroup.add(halo);
 
-    // Distant Sapphire Sea shimmer plane beyond the gate
-    this.seaMesh = new THREE.Mesh(
-      new THREE.CircleGeometry(70, 64),
-      new THREE.MeshBasicMaterial({ color: 0x2e7ee0, transparent: true, opacity: 0.55 })
+    const sea = new THREE.Mesh(
+      new THREE.CircleGeometry(72, 48),
+      new THREE.MeshBasicMaterial({ color: 0x2a7ae0, transparent: true, opacity: 0.5 })
     );
-    const sea = this.seaMesh;
     sea.rotation.x = -Math.PI / 2;
     sea.position.set(0, 2.2, -52);
     gateGroup.add(sea);
 
     this.group.add(gateGroup);
 
-    // Rising Road Overlook interaction point
     const oy = this.getGroundHeight(0, -27);
     this.interactables.push({
       id: 'rising-overlook',
@@ -1112,26 +1118,72 @@ export class TerraceWorld {
     });
   }
 
+  private buildVolumetricGodRaysAndMotes(): void {
+    // Soft diagonal golden sunbeams filtering through the Terrace & Walled Orchard
+    const rayMat = new THREE.MeshBasicMaterial({
+      color: 0xffefc2,
+      transparent: true,
+      opacity: 0.065,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    const raySpots: [number, number][] = [
+      [-14.5, -9.0], [14.0, -10.0], [0, 5.0], [4.5, 1.5], [-6.5, 8.5]
+    ];
+    raySpots.forEach(([rx, rz]) => {
+      const ray = new THREE.Mesh(new THREE.ConeGeometry(4.2, 22, 16, 1, true), rayMat);
+      ray.position.set(rx, 10.5, rz);
+      ray.rotation.x = 0.26;
+      ray.rotation.z = -0.14;
+      this.group.add(ray);
+    });
+
+    // Floating sunlit golden dust/pollen motes across the entire Terrace
+    const moteCount = 320;
+    const moteGeo = new THREE.BufferGeometry();
+    const motePos = new Float32Array(moteCount * 3);
+    for (let i = 0; i < moteCount; i++) {
+      motePos[i * 3] = (Math.random() - 0.5) * 52;
+      motePos[i * 3 + 1] = 0.6 + Math.random() * 8.5;
+      motePos[i * 3 + 2] = (Math.random() - 0.5) * 52 - 4;
+    }
+    moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+    this.goldenMotes = new THREE.Points(
+      moteGeo,
+      new THREE.PointsMaterial({
+        map: this.tex.softGlow,
+        color: 0xfff0b8,
+        size: 0.22,
+        transparent: true,
+        opacity: 0.62,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+      })
+    );
+    this.group.add(this.goldenMotes);
+  }
+
   private buildPrismaticBirds(): void {
-    // Iridescent hummingbirds/doves trailing glowing ribbons of color (C007_I03.png)
     const trailColors = [0xffa6d8, 0x8ef2ff, 0xffe680, 0xc9a8ff, 0xa8ffbe];
 
     for (let i = 0; i < 6; i++) {
       const bird = new THREE.Group();
       const body = new THREE.Mesh(
-        new THREE.ConeGeometry(0.12, 0.42, 6),
+        new THREE.ConeGeometry(0.11, 0.4, 8),
         new THREE.MeshBasicMaterial({ color: 0xffffff })
       );
       body.rotation.x = Math.PI / 2;
       bird.add(body);
 
       const wingMat = new THREE.MeshBasicMaterial({ color: trailColors[i % trailColors.length], side: THREE.DoubleSide });
-      const leftW = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.16), wingMat);
+      const leftW = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.15), wingMat);
       leftW.position.x = -0.22;
       leftW.rotation.x = Math.PI / 2;
       bird.add(leftW);
 
-      const rightW = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.16), wingMat);
+      const rightW = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.15), wingMat);
       rightW.position.x = 0.22;
       rightW.rotation.x = Math.PI / 2;
       bird.add(rightW);
@@ -1157,26 +1209,34 @@ export class TerraceWorld {
         angle: (i / 6) * Math.PI * 2,
         speed: 0.28 + (i % 3) * 0.08,
         radius: 10 + i * 2.8,
-        height: 4.5 + (i % 4) * 1.4,
-        center: new THREE.Vector3((i % 2 === 0 ? -4 : 6), 0, -4 + (i - 3) * 2)
+        height: 4.8 + (i % 4) * 1.4,
+        center: new THREE.Vector3(i % 2 === 0 ? -4 : 6, 0, -4 + (i - 3) * 2)
       });
     }
   }
 
   private buildSaintsAndBenches(): void {
-    this.woodMat = new THREE.MeshStandardMaterial({ color: 0x9c7b56, roughness: 0.7 });
-    const woodMat = this.woodMat;
-    const stoneLegMat = new THREE.MeshStandardMaterial({ color: 0xe9dec8, roughness: 0.65 });
+    const woodMat = new THREE.MeshStandardMaterial({
+      color: 0x9c7b56,
+      map: this.tex.bark.map,
+      normalMap: this.tex.bark.normalMap,
+      roughness: 0.78
+    });
+    const stoneLegMat = new THREE.MeshStandardMaterial({
+      color: 0xe9dec8,
+      map: this.tex.stone.map,
+      normalMap: this.tex.stone.normalMap,
+      roughness: 0.65
+    });
 
     SAINTS.forEach((profile) => {
       const [sx, , sz] = profile.position;
       const sy = this.getGroundHeight(sx, sz);
 
-      const agent = new SaintAgent(profile, sy);
+      const agent = new SaintAgent(profile, sy, this.tex.fabric);
       this.group.add(agent.group);
       this.saintAgents.set(profile.id, agent);
 
-      // "Pull Up a Chair" Stone & Timber Bench beside designated saints
       let seatPos: THREE.Vector3 | undefined;
       if (profile.hasBench && profile.benchOffset) {
         const bx = sx + profile.benchOffset[0];
@@ -1184,7 +1244,7 @@ export class TerraceWorld {
         const by = this.getGroundHeight(bx, bz);
 
         const bench = new THREE.Group();
-        const seat = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.14, 0.62), woodMat);
+        const seat = new THREE.Mesh(new THREE.BoxGeometry(1.82, 0.14, 0.64), woodMat);
         seat.position.y = 0.52;
         seat.castShadow = true;
         seat.receiveShadow = true;
@@ -1216,7 +1276,6 @@ export class TerraceWorld {
       });
     });
 
-    // Initialize organic eavesdropping banter pairs
     AMBIENT_BANTER_PAIRS.forEach((pair, idx) => {
       this.banterStates.set(pair.id, { lineIdx: 0, timer: 1.5 + idx * 1.1 });
     });
@@ -1234,8 +1293,9 @@ export class TerraceWorld {
     const pos = new Float32Array(count * 3);
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     const mat = new THREE.PointsMaterial({
+      map: this.tex.softGlow,
       color: 0xeaffb0,
-      size: 0.26,
+      size: 0.34,
       transparent: true,
       opacity: 0,
       blending: THREE.AdditiveBlending,
@@ -1253,7 +1313,6 @@ export class TerraceWorld {
     }
     attr.needsUpdate = true;
 
-    // GTA-style synchronized crowd reaction: nearby saints turn in awe toward the golden wave!
     this.saintAgents.forEach((agent) => {
       if (agent.group.position.distanceTo(origin) < 24) {
         agent.triggerLeafReaction();
@@ -1262,25 +1321,34 @@ export class TerraceWorld {
   }
 
   public update(dt: number, elapsed: number, playerPos: THREE.Vector3): void {
+    if (this.skyMaterial) this.skyMaterial.uniforms.uTime.value = elapsed;
     if (this.grassMaterial) {
       this.grassMaterial.uniforms.uTime.value = elapsed;
       this.grassMaterial.uniforms.uPlayerPos.value.copy(playerPos);
     }
-    if (this.waterMaterial instanceof THREE.ShaderMaterial && this.waterMaterial.uniforms.uTime) {
-      this.waterMaterial.uniforms.uTime.value = elapsed;
-    }
-    if (this.riverNormal) {
-      this.riverNormal.offset.x = elapsed * 0.018;
-      this.riverNormal.offset.y = elapsed * 0.01;
-    }
-    if (this.poolMaterial) {
-      this.poolMaterial.uniforms.uTime.value = elapsed;
-    }
-    if (this.pearlMaterial) {
-      this.pearlMaterial.uniforms.uTime.value = elapsed;
+    if (this.waterMaterial) this.waterMaterial.uniforms.uTime.value = elapsed;
+    if (this.waterfallMat) this.waterfallMat.uniforms.uTime.value = elapsed;
+    if (this.poolMaterial) this.poolMaterial.uniforms.uTime.value = elapsed;
+    if (this.pearlMaterial) this.pearlMaterial.uniforms.uTime.value = elapsed;
+
+    // Gentle drift of golden sunlit dust motes
+    if (this.goldenMotes) {
+      this.goldenMotes.position.y = Math.sin(elapsed * 0.4) * 0.25;
+      this.goldenMotes.rotation.y = elapsed * 0.008;
     }
 
-    // Update prismatic birds & light ribbon trails
+    // Rising waterfall mist
+    if (this.waterfallMist) {
+      const mp = this.waterfallMist.geometry.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < mp.count; i++) {
+        let my = mp.getY(i) + dt * 0.55;
+        if (my > 5.0) my = 0.2;
+        mp.setY(i, my);
+      }
+      mp.needsUpdate = true;
+    }
+
+    // Prismatic birds & ribbon trails
     this.birds.forEach((b, idx) => {
       b.angle += dt * b.speed;
       const nx = b.center.x + Math.cos(b.angle) * b.radius;
@@ -1292,12 +1360,10 @@ export class TerraceWorld {
       b.mesh.position.set(nx, ny, nz);
       b.mesh.lookAt(nx + (nx - prevX), ny, nz + (nz - prevZ));
 
-      // Gentle wing flap
       const flap = Math.sin(elapsed * 14 + idx * 2) * 0.55;
       b.mesh.children[1].rotation.z = flap;
       b.mesh.children[2].rotation.z = -flap;
 
-      // Shift ribbon trail positions
       const arr = b.trailPositions;
       for (let i = arr.length - 3; i >= 3; i -= 3) {
         arr[i] = arr[i - 3];
@@ -1310,7 +1376,6 @@ export class TerraceWorld {
       (b.trail.geometry.attributes.position as THREE.BufferAttribute).needsUpdate = true;
     });
 
-    // Drift Orchard healing leaves softly downward
     if (this.fallingLeaves) {
       const pos = this.fallingLeaves.geometry.attributes.position as THREE.BufferAttribute;
       for (let i = 0; i < pos.count; i++) {
@@ -1322,13 +1387,11 @@ export class TerraceWorld {
       pos.needsUpdate = true;
     }
 
-    // Gentle drift on Gray Mist puffs
     this.mistClouds.forEach((puff, i) => {
       puff.position.y += Math.sin(elapsed * 0.5 + i) * dt * 0.12;
       puff.rotation.y += dt * 0.04;
     });
 
-    // Update articulated Living Saints + sync patrolling interaction positions
     this.saintAgents.forEach((agent, id) => {
       const partner = agent.profile.partnerId ? this.saintAgents.get(agent.profile.partnerId) : undefined;
       agent.update(dt, elapsed, playerPos, (x, z) => this.getGroundHeight(x, z), partner?.group.position);
@@ -1342,7 +1405,6 @@ export class TerraceWorld {
       }
     });
 
-    // Organic Eavesdropping Banter Scheduler between conversing saint pairs
     AMBIENT_BANTER_PAIRS.forEach((pair) => {
       const state = this.banterStates.get(pair.id);
       const a = this.saintAgents.get(pair.speakers[0]);
@@ -1373,7 +1435,6 @@ export class TerraceWorld {
       }
     });
 
-    // Healing leaf expansion wave effect
     if (this.leafBurstTime >= 0) {
       this.leafBurstTime += dt;
       const mat = this.leafBurstParticles.material as THREE.PointsMaterial;

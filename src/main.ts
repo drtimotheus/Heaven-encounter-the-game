@@ -7,13 +7,8 @@ import { SSAOPass } from 'three/examples/jsm/postprocessing/SSAOPass.js';
 import { BokehPass } from 'three/examples/jsm/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { TerraceWorld, InteractablePoint } from './world/TerraceWorld';
-import {
-  GraphicsQuality,
-  loadGraphicsQuality,
-  loadWorldGraphics,
-  saveGraphicsQuality,
-  saintArchetype
-} from './world/graphics';
+import { GraphicsQuality, loadGraphicsQuality, saveGraphicsQuality } from './world/graphics';
+import { buildHeavenEnvironmentMap } from './world/ProceduralTextures';
 import { GuidedVisionController, VisionKind } from './world/GuidedVisions';
 import { DIALOGUES, DialogueChoice, DialogueNode, auditDialogueCanon } from './data/dialogues';
 import { REFERENCE_PLATES } from './data/plates';
@@ -31,16 +26,18 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.02;
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0xf7ead0, 0.0062);
+scene.fog = new THREE.FogExp2(0xf5e5c4, 0.0072);
+scene.environment = buildHeavenEnvironmentMap(renderer);
+scene.environmentIntensity = 0.85;
 
-const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 350);
+const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 380);
 
 let graphicsQuality: GraphicsQuality = loadGraphicsQuality();
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.22,
-  0.48,
-  0.86
+  0.28,
+  0.6,
+  0.82
 );
 let composer = new EffectComposer(renderer);
 
@@ -64,7 +61,6 @@ function rebuildComposer(): void {
   composer.addPass(bloomPass);
   composer.addPass(new OutputPass());
   composer.setSize(window.innerWidth, window.innerHeight);
-  terrace.setShadowQuality(graphicsQuality);
 }
 
 // --- World & Visions ---
@@ -924,18 +920,5 @@ document.querySelectorAll<HTMLButtonElement>('[data-gfx]').forEach((btn) => {
     window.location.reload();
   });
 });
-
-loadWorldGraphics(renderer, graphicsQuality)
-  .then((gfx) => {
-    scene.environment = gfx.envMap;
-    scene.environmentIntensity = gfx.envIntensity;
-    terrace.applyPbr(gfx);
-    terrace.saintAgents.forEach((agent) => {
-      agent.mountRig(gfx.characters[saintArchetype(agent.profile)], gfx.linen.map, gfx.linen.normal);
-    });
-  })
-  .catch((err) => {
-    console.error('Graphics upgrade failed; keeping the simple terrace.', err);
-  });
 
 animate();
