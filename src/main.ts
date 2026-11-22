@@ -94,6 +94,18 @@ const placesModal = document.getElementById('places-modal')!;
 const artBibleModal = document.getElementById('art-bible-modal')!;
 const roadmapModal = document.getElementById('roadmap-modal')!;
 const lightbox = document.getElementById('lightbox')!;
+const wispLayer = document.getElementById('wisp-layer')!;
+
+// Pre-create reusable DOM wisp elements for each living Saint
+const wispEls = new Map<string, HTMLDivElement>();
+terrace.saintAgents.forEach((agent, id) => {
+  const el = document.createElement('div');
+  el.className = 'saint-wisp hidden';
+  el.innerHTML = `<span class="saint-wisp-name">${agent.profile.name}</span><span class="saint-wisp-text"></span>`;
+  wispLayer.appendChild(el);
+  wispEls.set(id, el);
+});
+const tempProj = new THREE.Vector3();
 
 let whisperTimeout: number | undefined;
 function showWhisper(text: string, durationMs = 5200): void {
@@ -221,6 +233,7 @@ function triggerInteraction(point: InteractablePoint): void {
   if (point.type === 'saint') {
     eyesProgress.fellowship = true;
     updateEyesUI();
+    terrace.setActiveSaintConversation(point.id);
   }
 
   if (point.seatPos && point.seatLookAt) {
@@ -302,6 +315,7 @@ function handleChoice(choice: DialogueNode['choices'][number]): void {
 function closeDialogue(): void {
   dialoguePanel.classList.add('hidden');
   currentDialogue = null;
+  terrace.setActiveSaintConversation(null);
   if (seatTargetPos) {
     playerPos.copy(savedExplorePos);
     seatTargetPos = null;
@@ -410,11 +424,15 @@ document.querySelectorAll('.modal-close').forEach((btn) => {
 
 // Teleport shortcuts in Places Drawer
 const TELEPORTS: Record<string, { x: number; z: number; yaw: number }> = {
-  amos: { x: 0, z: 11, yaw: 0.2 },
+  amos: { x: 0, z: 11, yaw: 0.25 },
   orchard: { x: -11.5, z: -6.5, yaw: 1.2 },
   pool: { x: 10.5, z: -6.0, yaw: -0.75 },
   mist: { x: 17.5, z: 4.5, yaw: -1.4 },
-  overlook: { x: 0, z: -23.5, yaw: 0 }
+  overlook: { x: 0, z: -23.5, yaw: 0 },
+  paul_peter: { x: 4.1, z: 5.5, yaw: 0.05 },
+  david: { x: -4.2, z: 10.8, yaw: 0.85 },
+  moses_elijah: { x: 11.4, z: 9.8, yaw: -0.05 },
+  john_isaiah: { x: 0.1, z: -12.6, yaw: 0.0 }
 };
 
 document.querySelectorAll<HTMLButtonElement>('.place-btn').forEach((btn) => {
@@ -450,12 +468,52 @@ function updateZoneIndicator(): void {
 // --- Main Loop ---
 const clock = new THREE.Clock();
 let gloryWarnCooldown = 0;
+let davidHarpCooldown = 0;
+
+function updateAmbientWisps(): void {
+  const showWisps = mode === 'explore';
+  terrace.saintAgents.forEach((agent, id) => {
+    const el = wispEls.get(id);
+    if (!el) return;
+    if (!showWisps || !agent.activeWispText) {
+      el.classList.add('hidden');
+      return;
+    }
+
+    const dist = agent.group.position.distanceTo(playerPos);
+    if (dist > 16.5) {
+      el.classList.add('hidden');
+      return;
+    }
+
+    agent.getHeadWorldPos(tempProj);
+    tempProj.project(camera);
+
+    // Only display if in front of the camera and inside viewport
+    if (tempProj.z < -1 || tempProj.z > 1 || Math.abs(tempProj.x) > 0.94 || Math.abs(tempProj.y) > 0.88) {
+      el.classList.add('hidden');
+      return;
+    }
+
+    const sx = (tempProj.x * 0.5 + 0.5) * window.innerWidth;
+    const sy = (-tempProj.y * 0.5 + 0.5) * window.innerHeight;
+    el.style.left = `${sx}px`;
+    el.style.top = `${sy}px`;
+    el.style.opacity = String(THREE.MathUtils.clamp(1.25 - dist / 16.5, 0.35, 0.98));
+    const textEl = el.querySelector('.saint-wisp-text');
+    if (textEl && textEl.textContent !== agent.activeWispText) {
+      textEl.textContent = agent.activeWispText;
+    }
+    el.classList.remove('hidden');
+  });
+}
 
 function animate(): void {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.05);
   const elapsed = clock.getElapsedTime();
   gloryWarnCooldown = Math.max(0, gloryWarnCooldown - dt);
+  davidHarpCooldown = Math.max(0, davidHarpCooldown - dt);
 
   if (mode === 'title') {
     // Gentle aerial drift over the sunlit Terrace & Eastern Gate skyline
@@ -509,6 +567,13 @@ function animate(): void {
     terrace.update(dt, elapsed, playerPos);
     updateZoneIndicator();
 
+    // Soft distant harp chime when walking near King David
+    const david = terrace.saintAgents.get('david');
+    if (david && david.group.position.distanceTo(playerPos) < 9.5 && davidHarpCooldown <= 0) {
+      davidHarpCooldown = 7.5;
+      soundscape.playChime('stillness');
+    }
+
     // Find closest interactable point
     let nearest: InteractablePoint | null = null;
     let bestDist = Infinity;
@@ -556,6 +621,7 @@ function animate(): void {
     }
   }
 
+  updateAmbientWisps();
   composer.render();
 }
 

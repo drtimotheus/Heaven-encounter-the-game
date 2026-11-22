@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { SAINTS, SaintProfile } from '../data/dialogues';
+import { AMBIENT_BANTER_PAIRS, SAINTS } from '../data/dialogues';
+import { SaintAgent } from './SaintAgent';
 
 export interface InteractablePoint {
   id: string;
@@ -37,7 +38,8 @@ export class TerraceWorld {
   private leafBurstParticles!: THREE.Points;
   private leafBurstTime = -1;
   private mistClouds: THREE.Mesh[] = [];
-  private saintGroups: Map<string, { group: THREE.Group; baseY: number; profile: SaintProfile }> = new Map();
+  public readonly saintAgents: Map<string, SaintAgent> = new Map();
+  private banterStates: Map<string, { lineIdx: number; timer: number }> = new Map();
   private sunLight!: THREE.DirectionalLight;
 
   constructor() {
@@ -859,68 +861,11 @@ export class TerraceWorld {
       const [sx, , sz] = profile.position;
       const sy = this.getGroundHeight(sx, sz);
 
-      const saintGroup = new THREE.Group();
-      saintGroup.position.set(sx, sy, sz);
+      const agent = new SaintAgent(profile, sy);
+      this.group.add(agent.group);
+      this.saintAgents.set(profile.id, agent);
 
-      // Grounded, warm stylized figure matching each saint's canonical wardrobe palette
-      const lower = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.28, 0.36, 0.92, 12),
-        new THREE.MeshStandardMaterial({ color: 0x4b4743, roughness: 0.85 })
-      );
-      lower.position.y = 0.46;
-      lower.castShadow = true;
-      saintGroup.add(lower);
-
-      const torso = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.26, 0.29, 0.72, 12),
-        new THREE.MeshStandardMaterial({ color: profile.shirtColor, roughness: 0.7 })
-      );
-      torso.position.y = 1.24;
-      torso.castShadow = true;
-      saintGroup.add(torso);
-
-      // Vest / Suspenders / Shawl accent
-      const vest = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.285, 0.305, 0.52, 12, 1, true, -Math.PI * 0.75, Math.PI * 1.5),
-        new THREE.MeshStandardMaterial({ color: profile.vestColor, roughness: 0.72, side: THREE.DoubleSide })
-      );
-      vest.position.y = 1.22;
-      saintGroup.add(vest);
-
-      const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.21, 14, 14),
-        new THREE.MeshStandardMaterial({ color: profile.skinColor, roughness: 0.6 })
-      );
-      head.position.y = 1.82;
-      head.castShadow = true;
-      saintGroup.add(head);
-
-      const hair = new THREE.Mesh(
-        new THREE.SphereGeometry(0.225, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.58),
-        new THREE.MeshStandardMaterial({ color: profile.hairColor, roughness: 0.8 })
-      );
-      hair.position.y = 1.85;
-      saintGroup.add(hair);
-
-      // Soft warm ground halo indicating fellowship point
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.85, 1.05, 32),
-        new THREE.MeshBasicMaterial({
-          color: profile.auraColor,
-          transparent: true,
-          opacity: 0.48,
-          side: THREE.DoubleSide
-        })
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.y = 0.06;
-      saintGroup.add(ring);
-
-      saintGroup.lookAt(profile.lookAt[0], sy, profile.lookAt[2]);
-      this.group.add(saintGroup);
-      this.saintGroups.set(profile.id, { group: saintGroup, baseY: sy, profile });
-
-      // "Pull Up a Chair" Stone & Timber Bench beside each saint
+      // "Pull Up a Chair" Stone & Timber Bench beside designated saints
       let seatPos: THREE.Vector3 | undefined;
       if (profile.hasBench && profile.benchOffset) {
         const bx = sx + profile.benchOffset[0];
@@ -949,15 +894,26 @@ export class TerraceWorld {
 
       this.interactables.push({
         id: profile.id,
-        label: `Sit with ${profile.name}`,
+        label: `Speak with ${profile.name}`,
         sublabel: `Press E to pull up a chair · ${profile.title}`,
         position: new THREE.Vector3(sx, sy + 1.3, sz),
         radius: 3.6,
         type: 'saint',
         dialogueId: profile.startNodeId,
         seatPos,
-        seatLookAt: new THREE.Vector3(sx, sy + 1.72, sz)
+        seatLookAt: new THREE.Vector3(sx, sy + 1.65, sz)
       });
+    });
+
+    // Initialize organic eavesdropping banter pairs
+    AMBIENT_BANTER_PAIRS.forEach((pair, idx) => {
+      this.banterStates.set(pair.id, { lineIdx: 0, timer: 1.5 + idx * 1.1 });
+    });
+  }
+
+  public setActiveSaintConversation(saintId: string | null): void {
+    this.saintAgents.forEach((agent, id) => {
+      agent.setConverseWithPlayer(id === saintId);
     });
   }
 
@@ -985,6 +941,13 @@ export class TerraceWorld {
       attr.setXYZ(i, origin.x, origin.y, origin.z);
     }
     attr.needsUpdate = true;
+
+    // GTA-style synchronized crowd reaction: nearby saints turn in awe toward the golden wave!
+    this.saintAgents.forEach((agent) => {
+      if (agent.group.position.distanceTo(origin) < 24) {
+        agent.triggerLeafReaction();
+      }
+    });
   }
 
   public update(dt: number, elapsed: number, playerPos: THREE.Vector3): void {
@@ -1050,13 +1013,48 @@ export class TerraceWorld {
       puff.rotation.y += dt * 0.04;
     });
 
-    // Subtle breathing & gentle gaze toward nearby player for each saint
-    this.saintGroups.forEach(({ group, baseY }) => {
-      group.position.y = baseY + Math.sin(elapsed * 1.5) * 0.025;
-      const dist = group.position.distanceTo(playerPos);
-      if (dist < 7.5) {
-        const targetAngle = Math.atan2(playerPos.x - group.position.x, playerPos.z - group.position.z);
-        group.rotation.y += (targetAngle - group.rotation.y) * Math.min(1, dt * 2.2);
+    // Update articulated Living Saints + sync patrolling interaction positions
+    this.saintAgents.forEach((agent, id) => {
+      const partner = agent.profile.partnerId ? this.saintAgents.get(agent.profile.partnerId) : undefined;
+      agent.update(dt, elapsed, playerPos, (x, z) => this.getGroundHeight(x, z), partner?.group.position);
+
+      const inter = this.interactables.find((i) => i.id === id);
+      if (inter) {
+        inter.position.set(agent.group.position.x, agent.group.position.y + 1.3, agent.group.position.z);
+        if (inter.seatLookAt) {
+          inter.seatLookAt.set(agent.group.position.x, agent.group.position.y + 1.65, agent.group.position.z);
+        }
+      }
+    });
+
+    // Organic Eavesdropping Banter Scheduler between conversing saint pairs
+    AMBIENT_BANTER_PAIRS.forEach((pair) => {
+      const state = this.banterStates.get(pair.id);
+      const a = this.saintAgents.get(pair.speakers[0]);
+      const b = this.saintAgents.get(pair.speakers[1]);
+      if (!state || !a || !b) return;
+
+      const midX = (a.group.position.x + b.group.position.x) * 0.5;
+      const midZ = (a.group.position.z + b.group.position.z) * 0.5;
+      const playerNear = Math.hypot(playerPos.x - midX, playerPos.z - midZ) < 14.5;
+
+      if (playerNear) {
+        state.timer -= dt;
+        if (state.timer <= 0) {
+          const current = pair.lines[state.lineIdx % pair.lines.length];
+          const speaker = this.saintAgents.get(current.speakerId);
+          const listener = current.speakerId === pair.speakers[0] ? b : a;
+          if (speaker) {
+            speaker.showWisp(current.text, 5.4);
+            speaker.setTalking(true);
+            listener.setTalking(false);
+          }
+          state.lineIdx = (state.lineIdx + 1) % pair.lines.length;
+          state.timer = 6.2;
+        }
+      } else {
+        a.setTalking(false);
+        b.setTalking(false);
       }
     });
 
