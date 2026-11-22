@@ -43,6 +43,9 @@ export class TerraceWorld {
   private barkMat!: THREE.MeshStandardMaterial;
   private wallMat!: THREE.MeshStandardMaterial;
   private readonly trees: { group: THREE.Group; scale: number; healing: boolean }[] = [];
+  private gateGroup!: THREE.Group;
+  private flowerMesh!: THREE.InstancedMesh;
+  private readonly plainColumns: THREE.Mesh[] = [];
   private poolMaterial!: THREE.ShaderMaterial;
   private pearlMaterial!: THREE.ShaderMaterial;
   private birds: PrismaticBird[] = [];
@@ -206,7 +209,145 @@ export class TerraceWorld {
       }
     }
 
-    this.grassMesh.count = Math.max(120, Math.floor(this.grassMesh.count * (gfx.quality === 'low' ? 0.4 : 0.62)));
+    this.grassMesh.count = 0;
+    if (this.flowerMesh) this.flowerMesh.count = 0;
+    this.dressHeaven(gfx);
+  }
+
+  private dressHeaven(gfx: WorldGraphics): void {
+    const count = gfx.quality === 'low' ? 18 : gfx.quality === 'medium' ? 36 : 56;
+    this.scatterProp(gfx.props.grass, count, 0.85);
+    this.scatterProp(gfx.props.flowers, Math.floor(count * 0.55), 1);
+    this.scatterProp(gfx.props.fern, gfx.quality === 'low' ? 4 : 8, 1.1);
+
+    const columnMat = new THREE.MeshStandardMaterial({
+      color: 0xfff8ef,
+      map: gfx.marble.map,
+      normalMap: gfx.quality === 'low' ? null : gfx.marble.normal,
+      roughnessMap: gfx.marble.rough,
+      roughness: 0.38,
+      metalness: 0.04
+    });
+    this.plainColumns.forEach((col) => {
+      col.visible = false;
+      const ionic = gfx.props.column.clone(true);
+      ionic.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh) mesh.material = columnMat;
+      });
+      ionic.scale.setScalar(0.82);
+      ionic.position.copy(col.position);
+      ionic.position.y -= 2.2;
+      col.parent?.add(ionic);
+    });
+
+    const jasper = new THREE.MeshStandardMaterial({
+      color: 0xd7f3e4,
+      map: gfx.marble.map,
+      normalMap: gfx.quality === 'low' ? null : gfx.marble.normal,
+      roughness: 0.38,
+      metalness: 0.08,
+      emissive: 0x8fb89a,
+      emissiveIntensity: 0.12
+    });
+    const gold = new THREE.MeshStandardMaterial({
+      color: 0xf2c96b,
+      roughness: 0.28,
+      metalness: 0.72,
+      emissive: 0x6a4a10,
+      emissiveIntensity: 0.2
+    });
+    this.gateGroup.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (mesh.isMesh && mesh.userData.kind === 'jasper-wall') mesh.material = jasper;
+    });
+    [-8.2, 8.2].forEach((x) => {
+      const ionic = gfx.props.column.clone(true);
+      ionic.scale.setScalar(2.15);
+      ionic.position.set(x, -1.6, 0);
+      ionic.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.material = columnMat;
+          mesh.castShadow = gfx.quality !== 'low';
+        }
+      });
+      this.gateGroup.add(ionic);
+    });
+    const goldRim = new THREE.Mesh(new THREE.TorusGeometry(8.2, 0.18, 12, 48, Math.PI), gold);
+    goldRim.position.y = 3.6;
+    this.gateGroup.add(goldRim);
+    const innerPearl = new THREE.Mesh(new THREE.TorusGeometry(7.2, 0.55, 20, 48, Math.PI), this.pearlMaterial);
+    innerPearl.position.y = 3.3;
+    this.gateGroup.add(innerPearl);
+    [-16, 16].forEach((x) => {
+      const course = new THREE.Mesh(new THREE.BoxGeometry(16, 0.28, 2.8), gold);
+      course.position.set(x, 9.4, 0);
+      this.gateGroup.add(course);
+      const base = new THREE.Mesh(new THREE.BoxGeometry(16, 0.22, 2.8), gold);
+      base.position.set(x, 0.7, 0);
+      this.gateGroup.add(base);
+      for (let i = 0; i < 10; i++) {
+        const dentil = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.22, 0.28), gold);
+        dentil.position.set(x - 7 + i * 1.45, 9.05, 1.35);
+        this.gateGroup.add(dentil);
+      }
+    });
+
+    if (gfx.quality !== 'low') {
+      const shaftMat = new THREE.MeshBasicMaterial({
+        color: 0xfff1c4,
+        transparent: true,
+        opacity: 0.07,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+      });
+      const spots: [number, number][] = [[-6, 4], [8, -2], [-14, -8], [3, 10], [12, 6]];
+      spots.forEach(([x, z], i) => {
+        const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 1.8, 14, 8, 1, true), shaftMat);
+        shaft.position.set(x, this.getGroundHeight(x, z) + 7, z);
+        shaft.rotation.z = 0.35;
+        shaft.rotation.y = i;
+        this.group.add(shaft);
+      });
+    }
+  }
+
+  private scatterProp(template: THREE.Object3D, count: number, scale: number): void {
+    const parts: { geometry: THREE.BufferGeometry; material: THREE.Material }[] = [];
+    template.updateMatrixWorld(true);
+    template.traverse((obj) => {
+      const mesh = obj as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const geometry = mesh.geometry.clone();
+      geometry.applyMatrix4(mesh.matrixWorld);
+      const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+      parts.push({ geometry, material });
+    });
+    for (const part of parts) {
+      const inst = new THREE.InstancedMesh(part.geometry, part.material, count);
+      inst.castShadow = true;
+      inst.receiveShadow = true;
+      const dummy = new THREE.Object3D();
+      let placed = 0;
+      for (let n = 0; n < count * 6 && placed < count; n++) {
+        const x = (Math.random() - 0.5) * 48;
+        const z = (Math.random() - 0.5) * 46 - 2;
+        if (Math.abs(x - this.getRiverCenterX(z)) < 4.2) continue;
+        if (Math.hypot(x - 14, z + 10) < 5.5) continue;
+        if (x > 20) continue;
+        dummy.position.set(x, this.getGroundHeight(x, z), z);
+        dummy.rotation.y = Math.random() * Math.PI * 2;
+        const s = scale * (0.75 + Math.random() * 0.7);
+        dummy.scale.setScalar(s);
+        dummy.updateMatrix();
+        inst.setMatrixAt(placed++, dummy.matrix);
+      }
+      inst.count = placed;
+      inst.instanceMatrix.needsUpdate = true;
+      this.group.add(inst);
+    }
   }
 
   public getGroundHeight(x: number, z: number): number {
@@ -488,7 +629,8 @@ export class TerraceWorld {
       emissiveIntensity: 0.45,
       roughness: 0.35
     });
-    const mesh = new THREE.InstancedMesh(geo, mat, count);
+    this.flowerMesh = new THREE.InstancedMesh(geo, mat, count);
+    const mesh = this.flowerMesh;
     const dummy = new THREE.Object3D();
     const palette = [
       new THREE.Color(0xffb8d9), // rose-opalescent
@@ -794,6 +936,8 @@ export class TerraceWorld {
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
       const col = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 4.6, 12), marbleMat);
+      col.userData.kind = 'plain-column';
+      this.plainColumns.push(col);
       col.position.set(Math.cos(a) * 4.5, 2.5, Math.sin(a) * 4.5);
       col.castShadow = true;
       pav.add(col);
@@ -867,6 +1011,7 @@ export class TerraceWorld {
     const gateY = 4.2;
 
     const gateGroup = new THREE.Group();
+    this.gateGroup = gateGroup;
     gateGroup.position.set(0, gateY, gateZ);
 
     // Colossal translucent single-pearl arch (C016_I04_Pearl_Gate.png)
@@ -890,19 +1035,19 @@ export class TerraceWorld {
           vec3 N = normalize(vNormal);
           vec3 V = normalize(vViewPos);
           float fres = pow(1.0 - max(dot(N, V), 0.0), 2.2);
-          vec3 pearl = vec3(0.98, 0.96, 0.93);
+          vec3 pearl = vec3(0.78, 0.76, 0.72);
           vec3 nacre = vec3(
-            0.95 + 0.08 * sin(uTime * 0.7 + fres * 5.0),
-            0.90 + 0.10 * sin(uTime * 0.7 + fres * 5.0 + 2.0),
-            1.0
+            0.72 + 0.16 * sin(uTime * 0.7 + fres * 6.0),
+            0.70 + 0.14 * sin(uTime * 0.7 + fres * 6.0 + 2.1),
+            0.84 + 0.1 * sin(uTime * 0.5 + fres * 4.0)
           );
-          vec3 col = mix(pearl, nacre, fres) + vec3(1.0, 0.92, 0.7) * fres * 0.35;
+          vec3 col = mix(pearl, nacre, fres) + vec3(1.0, 0.9, 0.65) * fres * 0.22;
           gl_FragColor = vec4(col, 1.0);
         }
       `
     });
 
-    const pearlArch = new THREE.Mesh(new THREE.TorusGeometry(9.5, 2.5, 24, 48, Math.PI), this.pearlMaterial);
+    const pearlArch = new THREE.Mesh(new THREE.TorusGeometry(9.5, 1.35, 32, 64, Math.PI), this.pearlMaterial);
     pearlArch.position.y = 2.5;
     gateGroup.add(pearlArch);
 
@@ -914,7 +1059,8 @@ export class TerraceWorld {
       roughness: 0.2
     });
     [-19, 19].forEach((wx) => {
-      const w = new THREE.Mesh(new THREE.BoxGeometry(20, 10, 3.2), wallMat);
+      const w = new THREE.Mesh(new THREE.BoxGeometry(18, 9.2, 2.4), wallMat);
+      w.userData.kind = 'jasper-wall';
       w.position.set(wx, 5, 0);
       gateGroup.add(w);
     });

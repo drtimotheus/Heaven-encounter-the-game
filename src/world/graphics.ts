@@ -4,6 +4,7 @@ import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import { RGBELoader } from 'three/examples/jsm/loaders/RGBELoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import type { SaintProfile } from '../data/dialogues';
+import { lookFor, type SaintBody } from './robes';
 
 export type GraphicsQuality = 'low' | 'medium' | 'high';
 
@@ -23,8 +24,17 @@ export interface WorldGraphics {
   wood: { map: THREE.Texture; normal: THREE.Texture };
   leaf: THREE.Texture;
   waterNormal: THREE.Texture;
-  characters: Record<'male' | 'elder' | 'female', CharacterTemplate>;
+  characters: Record<SaintBody, CharacterTemplate>;
+  props: {
+    grass: THREE.Group;
+    flowers: THREE.Group;
+    fern: THREE.Group;
+    column: THREE.Group;
+  };
+  linen: { map: THREE.Texture; normal: THREE.Texture };
 }
+
+export type { SaintBody };
 
 const QUALITY_KEY = 'he-graphics';
 
@@ -45,12 +55,8 @@ export function saveGraphicsQuality(quality: GraphicsQuality): void {
   localStorage.setItem(QUALITY_KEY, quality);
 }
 
-export function saintArchetype(profile: SaintProfile): 'male' | 'elder' | 'female' {
-  if (profile.hasHeadscarf || profile.id === 'mara' || profile.id === 'mary_magdalene') return 'female';
-  if (profile.id === 'amos' || profile.id === 'elias' || profile.id === 'moses' || profile.id === 'elijah' || profile.id === 'isaiah') {
-    return 'elder';
-  }
-  return 'male';
+export function saintArchetype(profile: SaintProfile): SaintBody {
+  return lookFor(profile).body;
 }
 
 function loadColor(url: string, repeatX: number, repeatY: number, anisotropy: number): Promise<THREE.Texture> {
@@ -112,15 +118,16 @@ export async function loadWorldGraphics(
   const ktx2 = new KTX2Loader().setTranscoderPath('/basis/');
   ktx2.detectSupport(renderer);
 
-  const lod = quality === 'low' ? 'lod1' : 'lod0';
-  const hdr = await new RGBELoader().loadAsync('/assets/hdri/kloofendal_48d_partly_cloudy_puresky_2k.hdr');
+  const heroLod = quality === 'low' ? 'lod1' : 'lod0';
+  const supportLod = 'lod1';
+  const hdr = await new RGBELoader().loadAsync('/assets/hdri/kloofendal_1k.hdr');
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envMap = pmrem.fromEquirectangular(hdr).texture;
   hdr.dispose();
   pmrem.dispose();
 
-  const [grassMap, grassNor, grassRough, sandMap, sandNor, marbleMap, marbleNor, marbleRough, barkMap, barkNor, woodMap, woodNor, leaf, waterNormal, male, elder, female] =
+  const [grassMap, grassNor, grassRough, sandMap, sandNor, marbleMap, marbleNor, marbleRough, barkMap, barkNor, woodMap, woodNor, leaf, waterNormal, linenMap, linenNor, youth, sturdy, elder, woman, grass, flowers, fern, column] =
     await Promise.all([
       loadColor('/assets/textures/leafy_grass_diff.jpg', 18, 18, anisotropy),
       loadData('/assets/textures/leafy_grass_nor.jpg', 18, 18, anisotropy),
@@ -136,9 +143,16 @@ export async function loadWorldGraphics(
       loadData('/assets/textures/oak_wood_planks_nor.jpg', 2, 1.2, anisotropy),
       loadColor('/assets/textures/leaf_set.png', 1, 1, anisotropy),
       loadData('/assets/textures/water_ripples.png', 3, 8, anisotropy),
-      loadCharacter(`/assets/characters/casual-walker-${lod}.glb`, renderer, ktx2),
-      loadCharacter(`/assets/characters/dog-walker-${lod}.glb`, renderer, ktx2),
-      loadCharacter(`/assets/characters/hiker-${lod}.glb`, renderer, ktx2)
+      loadColor('/assets/textures/linen.png', 3, 3, anisotropy),
+      loadData('/assets/textures/linen_nor.png', 3, 3, anisotropy),
+      loadCharacter(`/assets/characters/casual-walker-${heroLod}.glb`, renderer, ktx2),
+      loadCharacter(`/assets/characters/road-worker-${heroLod}.glb`, renderer, ktx2),
+      loadCharacter(`/assets/characters/dog-walker-${supportLod}.glb`, renderer, ktx2),
+      loadCharacter(`/assets/characters/hiker-${supportLod}.glb`, renderer, ktx2),
+      loadProp('/assets/props/seagrass.glb', renderer, ktx2),
+      loadProp('/assets/props/wildflower.glb', renderer, ktx2),
+      loadProp('/assets/props/fern.glb', renderer, ktx2),
+      loadProp('/assets/props/ionic-column.glb', renderer, ktx2)
     ]);
 
   leaf.colorSpace = THREE.SRGBColorSpace;
@@ -155,6 +169,13 @@ export async function loadWorldGraphics(
     wood: { map: woodMap, normal: woodNor },
     leaf,
     waterNormal,
-    characters: { male, elder, female }
+    characters: { youth, sturdy, elder, woman },
+    props: { grass, flowers, fern, column },
+    linen: { map: linenMap, normal: linenNor }
   };
+}
+
+async function loadProp(url: string, renderer: THREE.WebGLRenderer, ktx2: KTX2Loader): Promise<THREE.Group> {
+  const loaded = await loadCharacter(url, renderer, ktx2);
+  return loaded.scene;
 }

@@ -226,6 +226,7 @@ export const SAINTS: SaintProfile[] = [
     hasBeard: true,
     shirtColor: 0xd6ccb8,
     vestColor: 0x355b7d, // Sea-blue fisherman cloak
+    bodyScale: 1.06,
     robeLowerColor: 0x4d4a44,
     hairColor: 0x8f877d,
     skinColor: 0xc48f67,

@@ -931,7 +931,7 @@ loadWorldGraphics(renderer, graphicsQuality)
     scene.environmentIntensity = gfx.envIntensity;
     terrace.applyPbr(gfx);
     terrace.saintAgents.forEach((agent) => {
-      agent.mountRig(gfx.characters[saintArchetype(agent.profile)]);
+      agent.mountRig(gfx.characters[saintArchetype(agent.profile)], gfx.linen.map, gfx.linen.normal);
     });
   })
   .catch((err) => {

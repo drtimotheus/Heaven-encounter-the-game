@@ -2,6 +2,15 @@ import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { SaintProfile } from '../data/dialogues';
 import type { CharacterTemplate } from './graphics';
+import {
+  createFaceUniforms,
+  dressHead,
+  dressInRobe,
+  linenMaterial,
+  lookFor,
+  revealFaceAndHands,
+  type FaceUniforms
+} from './robes';
 
 export type AgentState = 'stroll' | 'pair-talk' | 'harp-play' | 'bench-rest' | 'greet' | 'react-leaves' | 'converse-player';
 
@@ -40,7 +49,10 @@ export class SaintAgent {
   private actions: Partial<Record<'idle' | 'walk' | 'wave' | 'look_around', THREE.AnimationAction>> = {};
   private currentClip: 'idle' | 'walk' | 'wave' | 'look_around' = 'idle';
   private headBone: THREE.Object3D | null = null;
-  private crownUniform: { value: THREE.Vector3 } | null = null;
+  private handL: THREE.Object3D | null = null;
+  private handR: THREE.Object3D | null = null;
+  private faceUniforms: FaceUniforms | null = null;
+  private readonly faceQuat = new THREE.Quaternion();
 
   constructor(profile: SaintProfile, groundY: number) {
     this.profile = profile;
@@ -260,22 +272,34 @@ export class SaintAgent {
     return target;
   }
 
-  /** Swap the primitive body for a shared CC0 rig. The template is cloned per saint. */
-  public mountRig(template: CharacterTemplate): void {
+  /** Clone a CC0 body, keep only the face and hands, and dress it in a linen robe. */
+  public mountRig(template: CharacterTemplate, linenMap: THREE.Texture, linenNormal: THREE.Texture): void {
+    const look = lookFor(this.profile);
     const model = cloneSkinned(template.scene);
     model.rotation.y = Math.PI;
+    model.scale.set(look.shoulder, 1, look.shoulder);
+    const uniforms = createFaceUniforms();
+    this.faceUniforms = uniforms;
     model.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
-      if (mesh.isMesh) {
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.frustumCulled = false;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      const source = mesh.material as THREE.MeshStandardMaterial;
+      if (source?.isMeshStandardMaterial) {
+        const material = source.clone();
+        revealFaceAndHands(material, uniforms);
+        mesh.material = material;
       }
     });
     const box = new THREE.Box3().setFromObject(model);
     if (Number.isFinite(box.min.y)) model.position.y -= box.min.y;
     this.group.add(model);
     this.hips.visible = false;
+
+    const linen = linenMaterial(linenMap, linenNormal);
+    dressInRobe(model, linen, this.profile.vestColor);
 
     this.mixer = new THREE.AnimationMixer(model);
     const wanted = ['idle', 'walk', 'wave', 'look_around'] as const;
@@ -289,55 +313,10 @@ export class SaintAgent {
     this.actions.idle?.play();
     this.currentClip = 'idle';
 
-    model.traverse((obj) => {
-      if (obj.name === 'head') this.headBone = obj;
-    });
-    if (this.profile.balding && this.headBone) {
-      this.addBalding(model);
-    }
-  }
-
-  private addBalding(model: THREE.Object3D): void {
-    const crown = { value: new THREE.Vector3() };
-    this.crownUniform = crown;
-    model.traverse((obj) => {
-      const mesh = obj as THREE.Mesh;
-      if (!mesh.isMesh || !mesh.material) return;
-      const source = mesh.material as THREE.MeshStandardMaterial;
-      if (!source.isMeshStandardMaterial) return;
-      const material = source.clone();
-      material.onBeforeCompile = (shader) => {
-        shader.uniforms.uCrown = crown;
-        shader.vertexShader = shader.vertexShader
-          .replace('#include <common>', '#include <common>\nvarying vec3 vSaintWorld;')
-          .replace(
-            '#include <project_vertex>',
-            'vSaintWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#include <project_vertex>'
-          );
-        shader.fragmentShader = shader.fragmentShader
-          .replace('#include <common>', '#include <common>\nvarying vec3 vSaintWorld;\nuniform vec3 uCrown;')
-          .replace(
-            '#include <color_fragment>',
-            `#include <color_fragment>
-             float crownDist = distance(vSaintWorld.xz, uCrown.xz);
-             float crownH = smoothstep(uCrown.y - 0.08, uCrown.y + 0.01, vSaintWorld.y);
-             float bald = (1.0 - smoothstep(0.04, 0.11, crownDist)) * crownH;
-             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.80, 0.61, 0.47), bald);`
-          );
-      };
-      mesh.material = material;
-    });
-
-    const hair = new THREE.MeshStandardMaterial({ color: this.profile.hairColor, roughness: 0.7 });
-    const skin = new THREE.MeshStandardMaterial({ color: this.profile.skinColor, roughness: 0.52 });
-    const scalp = new THREE.Mesh(new THREE.SphereGeometry(0.105, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.48), skin);
-    scalp.position.set(0, 0.155, 0.01);
-    const fringe = new THREE.Mesh(new THREE.TorusGeometry(0.092, 0.026, 8, 16), hair);
-    fringe.rotation.x = Math.PI / 2.2;
-    fringe.position.set(0, 0.09, 0.015);
-    const nape = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8, 0.2, 2.6, 1.15, 0.85), hair);
-    nape.position.set(0, 0.05, -0.03);
-    this.headBone?.add(scalp, fringe, nape);
+    this.headBone = model.getObjectByName('head') ?? null;
+    this.handL = model.getObjectByName('hand_L') ?? null;
+    this.handR = model.getObjectByName('hand_R') ?? null;
+    if (this.headBone) dressHead(this.headBone, look, this.profile, linen);
   }
 
   private fadeClip(name: 'idle' | 'walk' | 'wave' | 'look_around'): void {
@@ -382,9 +361,13 @@ export class SaintAgent {
     this.gesturePhase += dt * 2.4;
     this.greetCooldown = Math.max(0, this.greetCooldown - dt);
     this.mixer?.update(dt);
-    if (this.crownUniform && this.headBone) {
-      this.headBone.getWorldPosition(this.crownUniform.value);
-      this.crownUniform.value.y += 0.12 * (this.profile.bodyScale ?? 1);
+    if (this.faceUniforms && this.headBone) {
+      this.headBone.getWorldPosition(this.faceUniforms.uHead.value);
+      this.headBone.getWorldQuaternion(this.faceQuat);
+      this.faceUniforms.uHeadUp.value.set(0, 1, 0).applyQuaternion(this.faceQuat);
+      this.faceUniforms.uHeadFwd.value.set(0, 0, 1).applyQuaternion(this.faceQuat);
+      this.handL?.getWorldPosition(this.faceUniforms.uHandL.value);
+      this.handR?.getWorldPosition(this.faceUniforms.uHandR.value);
     }
 
     if (this.wispTimer > 0) {
